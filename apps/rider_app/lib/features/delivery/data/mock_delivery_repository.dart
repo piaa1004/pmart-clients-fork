@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:dio/dio.dart';
 import 'package:pmart_api_delivery_execution/pmart_api_delivery_execution.dart'
     as ex;
@@ -17,6 +19,7 @@ base class MockDeliveryRepository
         DeliveryRepository,
         HandoverRepository,
         EvidenceUploader,
+        EvidencePhotoViewer,
         AssignmentCancelRepository,
         SupportThreadRepository {
   /// [seeded] 가 false 면 진행 중 배송 없이 시작한다(제안 화면 테스트용).
@@ -51,7 +54,57 @@ base class MockDeliveryRepository
         };
         _packages[pkg] = {'state': 'SEALED'};
       }
+      // 반품 회수 1건(dlv-r1): 고객 집에서 받아 MFC 로 가져간다(백엔드 요청 2026-11-17 회수 화면).
+      _deliveries['dlv-r1'] = {
+        'deliveryId': 'dlv-r1',
+        'version': 1,
+        'type': 'RETURN',
+        'purpose': 'CLAIM_RETURN',
+        'claimId': 'clm-mock-1',
+        'orderId': 'ord-r1',
+        'orderNumber': '41870236',
+        'riderId': riderId,
+        'mfcId': 'MFC-BSJ-01',
+        'mfcName': 'PMart 부산진구지점',
+        'state': 'ASSIGNED',
+        'packageIds': <String>[],
+        'handoverIds': <String>[],
+        'returnLines': [
+          {'orderLineId': 'ol-1', 'qty': 1, 'name': '그릭요거트 플레인 400g'},
+          {'orderLineId': 'ol-2', 'qty': 2, 'name': '바나나 1송이'},
+        ],
+        'orderSummary': {
+          'orderNumber': '41870236',
+          'items': [
+            {'name': '그릭요거트 플레인 400g', 'qty': 1, 'lineAmount': 5980},
+            {'name': '바나나 1송이', 'qty': 2, 'lineAmount': 7980},
+          ],
+        },
+      };
     }
+  }
+
+  /// 목 회수지(가짜 값 — 반품 회수는 고객 집 주소가 있다).
+  @override
+  Future<RecoveryContactView> recoveryContact(String deliveryId) async {
+    await _wait();
+    final d = _deliveries[deliveryId];
+    if (d == null || d['type'] != 'RETURN') {
+      throw const ProblemFailure(
+        Problem(status: 404, code: ProblemCode.notFound),
+      );
+    }
+    final claim = d['purpose'] == 'CLAIM_RETURN';
+    return RecoveryContactView(
+      receiverPhone: '01000000000',
+      receiverName: claim ? '김피마' : null,
+      roadAddress: claim ? '부산 부산진구 가야대로 482' : null,
+      detailAddress: claim ? '가야 푸른아파트 105동 702호' : null,
+      entranceMethod: claim ? EntranceMethod.call : null,
+      entranceNote: claim ? '도착하면 전화 주세요' : null,
+      lat: 35.1525,
+      lng: 129.0430,
+    );
   }
 
   final Duration latency;
@@ -139,6 +192,10 @@ base class MockDeliveryRepository
       throw const ProblemFailure(
         Problem(status: 404, code: ProblemCode.notFound),
       );
+    }
+    // 대화 화면을 열지 않고 배송 화면에 있어도 지원센터 처리(전달 재개 요청 반려 등)가 진행되게.
+    for (final id in [..._helpAt.keys]) {
+      if (_helpDelivery[id] == deliveryId) _advance(id);
     }
     return deliveryFromContract(ex.DeliveryExecution.fromJson(d));
   }
@@ -282,9 +339,28 @@ base class MockDeliveryRepository
     }
     if (_sent.contains(item.id)) return const SendAccepted();
     final d = _deliveries[item.targetId]!;
+    final recovery = d['type'] == 'RETURN';
     String? reject;
     String? next;
     switch (item.kind) {
+      // 회수 배송은 일반 단계(가게 도착·픽업·고객 도착·전달 완료)를 받지 않는다(409).
+      case DeliveryCommandKind.storeArrival ||
+              DeliveryCommandKind.pickup ||
+              DeliveryCommandKind.customerArrival ||
+              DeliveryCommandKind.completion
+          when recovery:
+        next = null;
+      case DeliveryCommandKind.returnPickup:
+        final refs = (item.payload['evidenceRefs'] as List?) ?? const [];
+        if (refs.isEmpty) {
+          reject = HandoverProblemCode.evidenceRequired;
+        } else {
+          next = recovery && d['state'] == 'ASSIGNED'
+              ? 'RETURN_PICKED_UP'
+              : null;
+        }
+      case DeliveryCommandKind.returnToStore:
+        next = d['state'] == 'RETURN_PICKED_UP' ? 'RETURNED_TO_STORE' : null;
       case DeliveryCommandKind.storeArrival:
         next = d['state'] == 'ASSIGNED' ? 'ARRIVED_AT_STORE' : null;
       case DeliveryCommandKind.pickup:
@@ -325,10 +401,25 @@ base class MockDeliveryRepository
             contacts.length < 2) {
           reject = HandoverProblemCode.contactAttemptsRequired;
         } else if (d['state'] == 'PICKED_UP' ||
-            d['state'] == 'ARRIVED_AT_CUSTOMER') {
+            d['state'] == 'ARRIVED_AT_CUSTOMER' ||
+            // 반품 회수는 받기 전(배정)에 실패 등록(계약 0.10.0).
+            (d['purpose'] == 'CLAIM_RETURN' && d['state'] == 'ASSIGNED')) {
           // 운영자 확정 전까지 진행 중(FAILURE_REPORTED). 반려되면 이 상태로 돌아간다.
           _beforeFailure[item.targetId] = d['state']! as String;
           next = 'FAILURE_REPORTED';
+          // 실패 등록이 같은 ID 의 지원센터 대화를 함께 연다(execution 0.14.0).
+          _helpAt.putIfAbsent(item.id, clock);
+          _helpDelivery[item.id] = item.targetId;
+          _helpCategory[item.id] = HelpCategory.customerUnreachable;
+          helpDetails[item.id] = item.payload['detail'] as String?;
+          _helpPhotos[item.id] = [
+            ...((item.payload['evidenceRefs'] as List?) ?? const [])
+                .cast<String>(),
+          ];
+          d['failure'] = {
+            'reason': item.payload['reason'],
+            'helpRequestId': item.id,
+          };
         }
     }
     if (reject != null) {
@@ -387,6 +478,46 @@ base class MockDeliveryRepository
   static const resumeHint = '전달할 수 있어요';
 
   final _beforeFailure = <String, String>{};
+
+  /// 운영자가 도움요청을 닫았다(시험용 — 실서버는 백오피스가 사건을 닫을 때).
+  void closeHelp(String requestId) => _helpResolved.add(requestId);
+  final resumeKeys = <String>[];
+
+  @override
+  Future<void> requestFailureResume(
+    String deliveryId, {
+    String? note,
+    required IdempotencyKey key,
+  }) async {
+    await _wait();
+    final d = _deliveries[deliveryId]!;
+    if (d['state'] != 'FAILURE_REPORTED') {
+      throw const ProblemFailure(
+        Problem(status: 409, code: ProblemCode.invalidState),
+      );
+    }
+    final failure = Map<String, Object?>.from(
+      (d['failure'] as Map?) ?? const {},
+    );
+    final helpId = failure['helpRequestId'] as String?;
+    if (resumeKeys.contains(key.value)) return;
+    resumeKeys.add(key.value);
+    failure['resumeRequestedAt'] = clock().toUtc().toIso8601String();
+    d['failure'] = failure;
+    // 대화에 "[전달 재개 요청] …" 이 남는다 — 목 상담원이 반려한다([resumeHint]).
+    if (helpId != null) {
+      _threads
+          .putIfAbsent(helpId, () => [])
+          .add(
+            _msg(
+              SupportSender.rider,
+              '[전달 재개 요청] ${note ?? resumeHint}',
+              clock(),
+            ),
+          );
+    }
+  }
+
   final _helpDelivery = <String, String>{};
   final _helpCategory = <String, HelpCategory>{};
 
@@ -441,6 +572,7 @@ base class MockDeliveryRepository
     _helpDelivery[key.value] = deliveryId;
     _helpCategory[key.value] = category;
     helpDetails[key.value] = detail;
+    _helpPhotos[key.value] = [...?evidenceRefs];
     if (loseNextHelpResponse) {
       loseNextHelpResponse = false;
       throw UnknownResultFailure(requestId: key.value, httpStatus: 504);
@@ -505,11 +637,12 @@ base class MockDeliveryRepository
         );
         return;
       }
+      // 목 상담원은 처리 완료로 바꾸지 않는다(실제로 처리한 것이 없는데 "처리 완료"가 보이면 헷갈린다 —
+      // 사용자 지적 2026-11-17). 처리 끝은 운영자가 닫을 때만([closeHelp]).
       final reply = riderSaid >= 2
-          ? '확인 후 처리했어요. 더 필요한 게 있으면 새 도움요청을 보내 주세요.'
+          ? '확인했어요. 계속 살펴보고 있으니 더 알려 주실 게 있으면 말씀해 주세요.'
           : '알려 주셔서 감사해요. 매장과 확인해서 바로 안내드릴게요.';
       thread.add(_msg(SupportSender.agent, reply, replyAt));
-      if (riderSaid >= 2) _helpResolved.add(id);
     }
   }
 
@@ -575,6 +708,30 @@ base class MockDeliveryRepository
       uploadFails = false;
       throw const NetworkFailure(DioExceptionType.connectionTimeout);
     }
-    return 'photo-${++_photo}';
+    final ref = 'photo-${++_photo}';
+    photos[ref] = photo.bytes;
+    return ref;
+  }
+
+  /// 올린 사진(서버 저장 흉내).
+  final photos = <String, Uint8List>{};
+  final _helpPhotos = <String, List<String>>{};
+
+  @override
+  Future<List<String>> requestPhotoRefs(
+    String deliveryId,
+    String requestId,
+  ) async {
+    await _wait();
+    return _helpPhotos[requestId] ?? const [];
+  }
+
+  @override
+  Future<Uint8List> photo(String deliveryId, String photoRef) async {
+    await _wait();
+    return photos[photoRef] ??
+        (throw const ProblemFailure(
+          Problem(status: 404, code: ProblemCode.notFound),
+        ));
   }
 }

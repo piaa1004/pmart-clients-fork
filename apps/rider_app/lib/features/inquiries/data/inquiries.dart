@@ -94,8 +94,11 @@ RiderInquiry inquiryFromContract(cs.Inquiry i) => RiderInquiry(
   state: _state(i.status),
   createdAt: i.createdAt,
   replies: [
+    // 라이더가 이어 쓴 줄(authorType RIDER, case 0.21.0)은 답변이 아니다 — 지원센터 답만.
     for (final r in i.replies)
-      if (r.body != null) InquiryReply(body: r.body!, at: r.createdAt),
+      if (r.body != null &&
+          r.authorType != cs.InquiryAllOfRepliesAuthorTypeEnum.RIDER)
+        InquiryReply(body: r.body!, at: r.createdAt),
   ],
 );
 

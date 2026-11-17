@@ -108,7 +108,7 @@ void main() {
       blockerFromWire('ACTIVE_DELIVERY'),
       WithdrawalBlocker.activeDelivery,
     );
-    expect(blockerFromWire('UNSETTLED_EARNINGS'), WithdrawalBlocker.unsettled);
+    expect(blockerFromWire('SOMETHING_NEW'), WithdrawalBlocker.other);
     expect(
       blockerFromWire('RESTRICTION_REVIEW'),
       WithdrawalBlocker.restrictionReview,

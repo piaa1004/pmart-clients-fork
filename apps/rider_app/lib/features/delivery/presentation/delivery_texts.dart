@@ -17,7 +17,35 @@ String executionText(AppLocalizations l10n, ExecutionState s) => switch (s) {
   ExecutionState.completed => l10n.exCompleted,
   ExecutionState.failed => l10n.exFailed,
   ExecutionState.cancelled => l10n.exCancelled,
+  ExecutionState.returnPickedUp => l10n.exReturnPickedUp,
+  ExecutionState.returnedToStore => l10n.exReturned,
   _ => l10n.exOther,
+};
+
+/// 회수 배송 단계 문구(받기 전 = 회수지로, 받은 뒤 = MFC 로).
+String recoveryStageText(AppLocalizations l10n, ExecutionState s) =>
+    switch (s) {
+      ExecutionState.assigned => l10n.recGoCollect,
+      ExecutionState.returnPickedUp => l10n.recGoReturn,
+      ExecutionState.returnedToStore => l10n.exReturned,
+      _ => executionText(l10n, s),
+    };
+
+/// 회수 목적(문구만 다르다).
+String recoveryPurposeText(AppLocalizations l10n, RecoveryPurpose p) =>
+    switch (p) {
+      RecoveryPurpose.claimReturn => l10n.recClaimReturn,
+      RecoveryPurpose.misdeliveryRecovery => l10n.recMisdelivery,
+      RecoveryPurpose.other => l10n.recOther,
+    };
+
+/// 원래 배송이 놓은 곳(오배송 회수).
+String placementText(AppLocalizations l10n, String? wire) => switch (wire) {
+  'HANDED_TO_CUSTOMER' => l10n.plcHanded,
+  'FRONT_DOOR' => l10n.plcFrontDoor,
+  'SECURITY_OFFICE' => l10n.plcSecurity,
+  'DELIVERY_BOX' => l10n.plcBox,
+  _ => l10n.plcOther,
 };
 
 /// 픽업지 이름. 지점 목록(목)에 있으면 한글 지점명, 없으면 센터 코드.
@@ -40,6 +68,7 @@ Color stageColor(ExecutionState s) => switch (s) {
   ExecutionState.arrivedAtStore => RiderColors.pickup,
   ExecutionState.pickedUp ||
   ExecutionState.arrivedAtCustomer ||
+  ExecutionState.returnPickedUp ||
   ExecutionState.completed => RiderColors.drop,
   ExecutionState.unassigned ||
   ExecutionState.failureReported => RiderColors.danger,
@@ -100,6 +129,7 @@ String helpCategoryText(AppLocalizations l10n, HelpCategory c) => switch (c) {
   HelpCategory.storeWaiting => l10n.hcStoreWaiting,
   HelpCategory.statusCorrection => l10n.hcStatusCorrection,
   HelpCategory.other => l10n.hcOther,
+  HelpCategory.deliveryFailure => l10n.hcDeliveryFailure,
 };
 
 /// 주문번호 표시(레퍼런스: 앞은 흐리게, 끝 4자리는 굵게).

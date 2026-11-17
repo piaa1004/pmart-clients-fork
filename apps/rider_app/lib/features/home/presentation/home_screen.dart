@@ -561,7 +561,9 @@ class _OfferCard extends ConsumerWidget {
       final id? => ref.watch(tripInfoProvider(id)).value,
       null => null,
     };
-    final arrival = offerArrival(group.last, trip);
+    // 회수 제안: 회수지(대략) → MFC 반납. 도착 예상은 일반 배송 값이라 보이지 않는다.
+    final rec = offer.recovery;
+    final arrival = rec != null ? null : offerArrival(group.last, trip);
     final bundle = group.length > 1;
     final fees = group.map((o) => o.estimatedFee);
     final fee = fees.contains(null)
@@ -594,7 +596,28 @@ class _OfferCard extends ConsumerWidget {
                 padding: const EdgeInsets.fromLTRB(14, 14, 10, 12),
                 child: Row(
                   children: [
-                    if (bundle || mode != null)
+                    if (rec != null)
+                      Container(
+                        margin: const EdgeInsets.only(right: 8),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 3,
+                        ),
+                        decoration: BoxDecoration(
+                          color: RiderColors.danger.withValues(alpha: 0.10),
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: Text(
+                          recoveryPurposeText(l10n, rec),
+                          key: const ValueKey('offer-recovery'),
+                          style: const TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                            color: RiderColors.danger,
+                          ),
+                        ),
+                      )
+                    else if (bundle || mode != null)
                       Container(
                         margin: const EdgeInsets.only(right: 8),
                         padding: const EdgeInsets.symmetric(
@@ -644,23 +667,41 @@ class _OfferCard extends ConsumerWidget {
               padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
               child: Column(
                 children: [
-                  _PlaceLine(
-                    label: l10n.pinPickup,
-                    value: storeText(l10n, store),
-                    trailing: pickup.isEmpty ? null : pickup,
-                  ),
-                  for (final o in group) ...[
+                  if (rec != null) ...[
+                    // 회수: 받는 곳(회수지 대략) → 두는 곳(MFC). 거리 = 회수지 → MFC.
+                    _PlaceLine(
+                      label: l10n.pinRecovery,
+                      value: offer.dropAreaLabel ?? l10n.dropAreaUnknown,
+                      trailing: null,
+                    ),
                     const SizedBox(height: 4),
                     _PlaceLine(
-                      label: bundle
-                          ? l10n.stopLabel(o.stopSequence ?? 0)
-                          : l10n.pinDrop,
-                      value: o.dropAreaLabel ?? l10n.dropAreaUnknown,
-                      trailing: switch (o.distanceKm) {
+                      label: l10n.pinReturn,
+                      value: storeText(l10n, store),
+                      trailing: switch (offer.distanceKm) {
                         final d? => l10n.distanceKm(d.toStringAsFixed(1)),
                         null => null,
                       },
                     ),
+                  ] else ...[
+                    _PlaceLine(
+                      label: l10n.pinPickup,
+                      value: storeText(l10n, store),
+                      trailing: pickup.isEmpty ? null : pickup,
+                    ),
+                    for (final o in group) ...[
+                      const SizedBox(height: 4),
+                      _PlaceLine(
+                        label: bundle
+                            ? l10n.stopLabel(o.stopSequence ?? 0)
+                            : l10n.pinDrop,
+                        value: o.dropAreaLabel ?? l10n.dropAreaUnknown,
+                        trailing: switch (o.distanceKm) {
+                          final d? => l10n.distanceKm(d.toStringAsFixed(1)),
+                          null => null,
+                        },
+                      ),
+                    ],
                   ],
                   if (arrival != null) ...[
                     const SizedBox(height: 8),

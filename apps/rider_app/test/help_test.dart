@@ -55,7 +55,7 @@ void main() {
     expect(c.read(p).last!.caseId, startsWith('CS-'));
     expect(c.read(thread).messages.single.sender, SupportSender.agent);
 
-    // 라이더가 말하면 상담원이 답한다. 두 번 주고받으면 처리 완료.
+    // 라이더가 말하면 상담원이 답한다. 목 상담원은 처리 완료로 바꾸지 않는다 — 운영자가 닫아야 끝.
     expect(await c.read(thread.notifier).send('고객이 전화를 안 받아요'), isTrue);
     now = now.add(MockDeliveryRepository.replyAfter);
     await c.read(thread.notifier).load();
@@ -65,6 +65,9 @@ void main() {
     now = now.add(MockDeliveryRepository.replyAfter);
     await c.read(thread.notifier).load();
     expect(c.read(thread).messages, hasLength(5));
+    expect(c.read(p).state, HelpState.inProgress);
+    repo.closeHelp(c.read(p).key!.value);
+    await c.read(p.notifier).refresh();
     expect(c.read(p).state, HelpState.resolved);
   });
 
@@ -92,8 +95,8 @@ void main() {
       ),
     );
     Future<void> settle() async {
-      for (var i = 0; i < 6; i++) {
-        await t.pump(const Duration(milliseconds: 20));
+      for (var i = 0; i < 12; i++) {
+        await t.pump(const Duration(milliseconds: 25));
       }
     }
 
@@ -144,7 +147,8 @@ void main() {
     // 보내면 그 요청의 진행상황·대화 화면으로 간다(접수됨, 상담원 배정 대기).
     expect(find.byKey(const ValueKey('thread-messages')), findsOneWidget);
     expect(find.text('지원센터에 접수했어요'), findsOneWidget);
-    expect(find.text('사진이 계속 안 올라가요'), findsOneWidget);
+    // 고른 문제·쓴 내용이 대화의 첫 말로 보인다.
+    expect(find.text('사진을 올릴 수 없어요\n사진이 계속 안 올라가요'), findsOneWidget);
     expect(find.text('상담원이 배정되면 여기로 답장이 와요.'), findsOneWidget);
 
     // 상담원이 배정되면(목: 10초) 화면이 4초마다 확인해 첫 인사·처리 중·접수번호가 보인다.
@@ -169,10 +173,10 @@ void main() {
     expect(find.textContaining('매장과 확인해서'), findsOneWidget);
 
     // 나갔다가 배송 화면에서도 진행상황이 보이고, 누르면 다시 들어간다.
-    await t.tap(find.byType(BackButton)); // 대화 → 지원센터
+    // 대화에서 뒤로 가면 지원센터(보내기 화면)를 건너뛰고 도움요청을 누른 배송 화면으로 간다.
+    await t.tap(find.byType(BackButton));
     await settle();
-    await t.tap(find.byType(BackButton)); // 지원센터 → 배송
-    await settle();
+    expect(find.byKey(const ValueKey('support-center')), findsNothing);
     expect(find.byKey(const ValueKey('help-status')), findsOneWidget);
     expect(find.textContaining('지원센터가 처리하고 있어요'), findsOneWidget);
     await t.tap(find.byKey(const ValueKey('help-status')));
@@ -197,7 +201,9 @@ void main() {
     await settle();
     await t.tap(send);
     await settle();
-    await t.tap(find.byType(BackButton)); // 새 요청의 대화 → 지원센터
+    await t.tap(find.byType(BackButton)); // 새 요청의 대화 → 배송 화면
+    await settle();
+    await t.tap(find.byKey(const ValueKey('help-status'))); // 지원센터 다시
     await settle();
     expect(
       find.byWidgetPredicate(
@@ -231,8 +237,8 @@ void main() {
       ),
     );
     Future<void> settle() async {
-      for (var i = 0; i < 6; i++) {
-        await t.pump(const Duration(milliseconds: 20));
+      for (var i = 0; i < 12; i++) {
+        await t.pump(const Duration(milliseconds: 25));
       }
     }
 
@@ -244,9 +250,24 @@ void main() {
     expect(find.byKey(const ValueKey('help-report-failure')), findsNothing);
     await t.tap(find.byKey(const ValueKey('help')));
     await settle();
+    // 지원센터에 "전달할 수 없어요" 줄이 따로 없다 — 고객 연락 안 됨·주소 문제를 고르면 갈림길이 나온다.
+    expect(find.byKey(const ValueKey('help-report-failure')), findsNothing);
+    await t.tap(find.byKey(const ValueKey('help-appError')));
+    await settle();
+    expect(find.byKey(const ValueKey('failure-fork')), findsNothing);
+    await t.tap(find.byKey(const ValueKey('help-customerUnreachable')));
+    await settle();
+    expect(find.byKey(const ValueKey('failure-fork')), findsOneWidget);
     await t.tap(find.byKey(const ValueKey('help-report-failure')));
     await settle();
 
+    // 고른 문제에 맞춰 사유("연락 안 됨")가 미리 골라져 있다. 바꿀 수도 있다.
+    expect(
+      t
+          .widget<PillOption>(find.byKey(const ValueKey('failure-unreachable')))
+          .selected,
+      isTrue,
+    );
     final submit = find.byKey(const ValueKey('failure-submit'));
     await t.tap(find.byKey(const ValueKey('failure-customerAbsent')));
     await settle();
@@ -267,9 +288,27 @@ void main() {
     expect(repo.deliveryJson('dlv-1')['state'], 'FAILURE_REPORTED');
     // 알리면 같은 내용으로 지원센터 대화가 열리고 대화 화면으로 바로 간다(도움요청을 다시 쓰지 않는다).
     expect(find.byKey(const ValueKey('thread-messages')), findsOneWidget);
-    expect(find.text('전달 불가를 알렸어요 · 사유: 고객 부재'), findsOneWidget);
+    // 앞에서 고른 문제·사유·연락·사진이 대화의 첫 말로 들어가 있다(다시 쓰지 않는다). 상태는 접수됨.
+    const summary =
+        '고객과 연락이 안 돼요 → 전달할 수 없어요\n'
+        '사유: 고객 부재\n'
+        '시도: 전화 2번';
+    expect(find.text(summary), findsOneWidget);
+    // "사진"을 누르면 첨부한 사진이 보인다.
+    await t.tap(find.byKey(const ValueKey('request-photo')));
+    await settle();
+    expect(find.byKey(const ValueKey('request-photo-view')), findsOneWidget);
+    await t.tap(find.text('확인'));
+    await settle();
+    expect(find.text('지원센터에 접수했어요'), findsOneWidget);
     expect(find.byKey(const ValueKey('thread-input')), findsOneWidget);
-    expect(repo.helpDetails.values, contains('전달 불가를 알렸어요 · 사유: 고객 부재'));
+    expect(repo.helpDetails.values, contains(summary));
+    // 서버가 실패 등록과 함께 대화를 연다 — 앱이 도움요청을 따로 보내지 않는다(운영자 쪽 두 건 방지).
+    expect(repo.helpDetails, hasLength(1));
+    expect(
+      (repo.deliveryJson('dlv-1')['failure']! as Map)['helpRequestId'],
+      repo.helpDetails.keys.single,
+    );
 
     // 대화에서 나오면 배송 화면: 운영자 확인 대기 + "지원센터와 대화하기"로 다시 들어간다.
     await t.tap(find.byType(BackButton));
@@ -283,12 +322,61 @@ void main() {
     await t.tap(find.byType(BackButton));
     await settle();
 
+    // 도움요청을 다시 열어도 접수됐다는 표시가 있고, 고객 연락 안 됨을 고르면 버튼이 계속 보인다 —
+    // 누르면 다시 신고하지 않고 그 신고의 대화로 간다.
+    // 아래 칸이 도움요청 줄을 덮으므로 그 칸의 도움요청으로 들어간다.
+    await t.tap(find.byKey(const ValueKey('failure-help')));
+    await settle();
+    expect(find.byKey(const ValueKey('failure-received')), findsOneWidget);
+    // 아래 "보낸 요청"에는 신고를 또 띄우지 않는다.
+    expect(
+      find
+          .byType(InkWell)
+          .evaluate()
+          .where(
+            (e) =>
+                e.widget.key is ValueKey<String> &&
+                (e.widget.key! as ValueKey<String>).value.startsWith('ticket-'),
+          ),
+      isEmpty,
+    );
+    await t.tap(find.byKey(const ValueKey('help-customerUnreachable')));
+    await settle();
+    expect(find.byKey(const ValueKey('help-report-failure')), findsOneWidget);
+    await t.tap(find.byKey(const ValueKey('help-report-failure')));
+    await settle();
+    expect(find.text(summary), findsOneWidget);
+    expect(repo.helpDetails, hasLength(1));
+    await t.tap(find.byType(BackButton));
+    await settle();
+    await t.tap(find.byType(BackButton));
+    await settle();
+
+    // 그 사이 상담원과 두 번 주고받았다(전에는 목 상담원이 여기서 "처리 완료"로 닫아 재개 요청을 받지 않았다).
+    final threadId = repo.helpDetails.keys.single;
+    for (final text in ['고객이 계속 안 받아요', '조금 더 기다려 볼게요']) {
+      // 목 지연은 가짜 시계라 pump 로 흘린다.
+      final sent = repo.sendMessage(
+        'dlv-1',
+        threadId,
+        text,
+        key: IdempotencyKey.generate(),
+      );
+      await t.pump(const Duration(seconds: 1));
+      await sent;
+      now = now.add(MockDeliveryRepository.assignAfter);
+      final read = repo.threadMessages('dlv-1', threadId);
+      await t.pump(const Duration(seconds: 1));
+      await read;
+    }
+
     // 그 뒤 고객에게 연락이 와서 전달할 수 있게 됐다 → "고객과 연락됐어요" → 대화에 알린다.
     // 라이더가 직접 취소하지 않는다 — 운영자가 반려하면 원래 단계로 돌아온다.
     await t.tap(find.byKey(const ValueKey('failure-resume')));
     await settle();
     expect(find.byKey(const ValueKey('thread-messages')), findsOneWidget);
-    expect(find.textContaining('고객과 다시 연락이 됐어요'), findsOneWidget);
+    expect(find.textContaining('[전달 재개 요청] 고객과 다시 연락이 됐어요'), findsOneWidget);
+    expect(repo.resumeKeys, hasLength(1));
 
     // 상담원 배정·답장(목) → 반려.
     now = now.add(
@@ -298,6 +386,8 @@ void main() {
     await settle();
     expect(find.textContaining('전달 불가를 반려했으니'), findsOneWidget);
     expect(repo.deliveryJson('dlv-1')['state'], 'PICKED_UP');
+    // 배송 화면이 배송 상태를 확인하다 반려를 알아채고 안내를 띄운다(대화 화면 위에도 보인다).
+    expect(find.text('전달 불가가 반려됐어요. 고객에게 전달을 계속해 주세요'), findsOneWidget);
 
     // 배송 화면은 확인해서 전달 단계로 돌아온다.
     await t.tap(find.byType(BackButton));
@@ -305,7 +395,6 @@ void main() {
     await settle();
     expect(find.byKey(const ValueKey('failure-waiting')), findsNothing);
     expect(find.byKey(const ValueKey('failure-resume')), findsNothing);
-    expect(find.text('전달 불가가 반려됐어요. 고객에게 전달을 계속해 주세요'), findsOneWidget);
   });
 
   test('앱을 다시 켜도 보낸 도움요청을 서버 목록에서 되찾는다', () async {

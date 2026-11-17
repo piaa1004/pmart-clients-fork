@@ -6,6 +6,7 @@ import 'package:pmart_core/pmart_core.dart';
 import '../../delivery/data/trip_repository.dart' show rememberOfferTrip;
 
 import '../../../shared/providers.dart' show sourceSystem;
+import '../../delivery/domain/delivery.dart' show recoveryPurposeFrom;
 import '../domain/offer_list.dart';
 
 abstract interface class OfferRepository {
@@ -281,6 +282,10 @@ OfferList offerListFromContract(ListMyOffers200Response body) {
           bundleId: o.bundleId,
           bundleSize: o.bundleSize,
           stopSequence: o.stopSequence,
+          recovery: recoveryPurposeFrom(
+            type: o.deliveryType?.value,
+            purpose: o.purpose?.value,
+          ),
         ),
     ],
     pollAfter: switch (body.pollAfterSec) {

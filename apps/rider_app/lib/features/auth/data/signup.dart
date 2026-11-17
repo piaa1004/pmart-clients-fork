@@ -34,6 +34,9 @@ class AreaOption {
   final String name;
 }
 
+/// 은행 선택지: 보이는 이름 + 보내는 코드.
+typedef BankOption = ({String code, String name});
+
 /// 가입 입력(`POST /riders/signups` 본문 + 면허).
 @immutable
 class SignupDraft {
@@ -42,6 +45,7 @@ class SignupDraft {
     this.phone = '',
     this.name = '',
     this.bankName,
+    this.bankCode,
     this.holderName = '',
     this.accountNumber = '',
     this.roadAddress = '',
@@ -57,6 +61,9 @@ class SignupDraft {
   final String phone;
   final String name;
   final String? bankName;
+
+  /// 금융결제원 은행 코드 3자리(서버로 보내는 값 — rider 0.7.0, 사용자 결정 2026-11-17).
+  final String? bankCode;
   final String holderName;
   final String accountNumber;
 
@@ -78,6 +85,7 @@ class SignupDraft {
     String? phone,
     String? name,
     String? bankName,
+    String? bankCode,
     String? holderName,
     String? accountNumber,
     String? roadAddress,
@@ -92,6 +100,7 @@ class SignupDraft {
     phone: phone ?? this.phone,
     name: name ?? this.name,
     bankName: bankName ?? this.bankName,
+    bankCode: bankCode ?? this.bankCode,
     holderName: holderName ?? this.holderName,
     accountNumber: accountNumber ?? this.accountNumber,
     roadAddress: roadAddress ?? this.roadAddress,
@@ -142,15 +151,19 @@ abstract final class SignupOptions {
     ConsentItem(type: 'MARKETING', required: false),
   ];
 
-  static const banks = [
-    '국민은행',
-    '신한은행',
-    '우리은행',
-    '하나은행',
-    '농협은행',
-    '카카오뱅크',
-    '토스뱅크',
+  /// 목 은행 목록(금융결제원 코드). 실서버는 `GET /riders/bank-codes`.
+  static const banks = <BankOption>[
+    (code: '004', name: '국민은행'),
+    (code: '088', name: '신한은행'),
+    (code: '020', name: '우리은행'),
+    (code: '081', name: '하나은행'),
+    (code: '011', name: '농협은행'),
+    (code: '090', name: '카카오뱅크'),
+    (code: '092', name: '토스뱅크'),
   ];
+
+  /// 약관 버전(약관 문서 작성 기준일). 서버는 버전 없는 동의를 기록하지 않는다(rider 회신 2026-11-17 §16-2).
+  static const termsVersion = '2026-11-17';
 
   /// 권역별 지점(충청 7 · 강원 2 · 전라 4 · 경상 13). 이름순 — 같은 도시(대구·부산…)끼리 모인다.
   static Map<MfcRegion, List<AreaOption>> get areas => {
@@ -169,15 +182,37 @@ abstract interface class SignupRepository {
   /// 운전면허 중복 확인(`POST /riders/license-checks`). true 면 쓸 수 있다.
   Future<bool> isLicenseAvailable(String licenseNumber);
 
-  /// 휴대폰 번호 중복 확인("인증하기" — 본인인증이 아니라 중복만, 사용자 결정 2026-11-10).
-  /// true 면 쓸 수 있다. null = 가입 전 확인 API 가 없다(실서버) — 가입 때 서버가 409 DUPLICATE_RIDER 로 거절한다.
-  /// 백엔드 요청 중(handoff rider-app/2026-11-16-backend-trip-info-and-signup.md §14).
+  /// 휴대폰 번호 중복 확인("인증하기" — 본인인증이 아니라 중복만). `POST /riders/phone-checks`(rider 0.7.0).
+  /// true 면 쓸 수 있다. null = 서버에 아직 그 경로가 없다(배포 전 404·405·501) — 가입 때 서버가 확인한다.
   Future<bool?> isPhoneAvailable(String phone);
 
-  /// 정산 계좌 중복 확인("인증하기" — 실명·1원 인증이 아니라 다른 라이더가 등록했는지만).
-  /// true 면 쓸 수 있다. null = 확인 API 가 없다(실서버) — 백엔드 요청 중(handoff §15).
-  Future<bool?> isAccountAvailable(String bankName, String accountNumber);
+  /// 정산 계좌 중복 확인(다른 라이더가 등록했는지만). `POST /riders/account-checks`(은행 코드 3자리).
+  /// null = 서버에 아직 경로가 없다.
+  Future<bool?> isAccountAvailable(String bankCode, String accountNumber);
+
+  /// 은행 목록(이름·금융결제원 코드). `GET /riders/bank-codes`. 서버에 없으면 앱 목록.
+  Future<List<BankOption>> banks();
 }
+
+/// 서버에 그 경로가 아직 없다(배포 전) — 확인을 "가입 때"로 미룬다. 실패를 통과로 바꾸지 않는다.
+bool _notDeployed(PmartFailure f) => switch (f) {
+  ProblemFailure(:final problem) => const {
+    404,
+    405,
+    501,
+  }.contains(problem.status),
+  UnexpectedResponseFailure(:final httpStatus) => const {
+    404,
+    405,
+    501,
+  }.contains(httpStatus),
+  UnknownResultFailure(:final httpStatus, :final problem) => const {
+    404,
+    405,
+    501,
+  }.contains(problem?.status ?? httpStatus),
+  _ => false,
+};
 
 /// 목 구현(휴대폰·계좌 중복도 흉내 낸다).
 final class MockSignupRepository implements SignupRepository {
@@ -194,8 +229,8 @@ final class MockSignupRepository implements SignupRepository {
     await Future<void>.delayed(latency);
     submitted = draft;
     registeredPhones.add(draft.phone);
-    if (draft.bankName != null && draft.accountNumber.isNotEmpty) {
-      registeredAccounts.add('${draft.bankName}|${draft.accountNumber}');
+    if (draft.bankCode != null && draft.accountNumber.isNotEmpty) {
+      registeredAccounts.add('${draft.bankCode}|${draft.accountNumber}');
     }
     if (draft.licenseNumber.isNotEmpty) {
       registeredLicenses.add(normalizeLicense(draft.licenseNumber));
@@ -217,25 +252,28 @@ final class MockSignupRepository implements SignupRepository {
     return !registeredPhones.contains(phone);
   }
 
-  /// 이미 다른 라이더가 등록한 계좌(시연용 가짜 — 은행|번호).
-  final registeredAccounts = <String>{'국민은행|1111222233'};
+  /// 이미 다른 라이더가 등록한 계좌(시연용 가짜 — 은행코드|번호, 국민 004).
+  final registeredAccounts = <String>{'004|1111222233'};
 
   @override
   Future<bool?> isAccountAvailable(
-    String bankName,
+    String bankCode,
     String accountNumber,
   ) async {
     await Future<void>.delayed(latency);
-    return !registeredAccounts.contains('$bankName|$accountNumber');
+    return !registeredAccounts.contains('$bankCode|$accountNumber');
   }
+
+  @override
+  Future<List<BankOption>> banks() async => SignupOptions.banks;
 }
 
-/// 실서버 가입(rider-service). 라이더 토큰(Google 로그인)이 있어야 부를 수 있다.
+/// 실서버 가입(rider-service 0.7.0). 라이더 토큰(Google 로그인)이 있어야 부를 수 있다.
 ///
 /// - 같은 가입은 같은 멱등 키로 다시 보낸다(성공하면 새 키).
-/// - 은행: 계약 `bankCode` 형식이 정해지지 않아 은행 이름을 그대로 보낸다 — 백엔드에 물음(handoff §16).
-/// - 배달 지역 `mfcId` 는 서버 지점 목록(`GET /mfc-pickup-points`)의 CenterId 여야 한다 — 그 목록은
-///   생성 클라이언트에 아직 없다(center-master 생성은 PC 1, handoff §16). 지금은 앱의 26개 지점 코드.
+/// - 확인 경로(면허·번호·계좌)도 변경 요청 규칙대로 Idempotency-Key·X-Source-System 을 붙인다
+///   (공통 인터셉터가 키 없는 POST 를 막는다 — 전에는 면허 확인이 서버로 나가지 않았다).
+/// - 은행은 금융결제원 코드 3자리, 약관은 앱이 보여 준 버전([SignupOptions.termsVersion])을 보낸다.
 final class ApiSignupRepository implements SignupRepository {
   ApiSignupRepository(Dio dio)
     : _signup = rd.PmartApiRider(dio: dio).getSignupApi();
@@ -262,10 +300,10 @@ final class ApiSignupRepository implements SignupRepository {
           licenseNumber: draft.licenseNumber.trim().isEmpty
               ? null
               : draft.licenseNumber.trim(),
-          bankAccount: draft.bankName == null || draft.accountNumber.isEmpty
+          bankAccount: draft.bankCode == null || draft.accountNumber.isEmpty
               ? null
               : rd.RiderSignupRequestBankAccount(
-                  bankCode: draft.bankName!,
+                  bankCode: draft.bankCode!,
                   accountNumber: draft.accountNumber,
                   holderName: draft.holderName.trim(),
                 ),
@@ -278,7 +316,10 @@ final class ApiSignupRepository implements SignupRepository {
           ],
           consents: [
             for (final c in draft.consents)
-              rd.RiderSignupRequestConsentsInner(consentType: c),
+              rd.RiderSignupRequestConsentsInner(
+                consentType: c,
+                version: SignupOptions.termsVersion,
+              ),
           ],
         ),
         extra: commandOptions(key).extra,
@@ -289,27 +330,78 @@ final class ApiSignupRepository implements SignupRepository {
 
   @override
   Future<bool> isLicenseAvailable(String licenseNumber) async {
+    final key = IdempotencyKey.generate();
     final res = await pmartGuard(
       () => _signup.checkRiderLicense(
         checkRiderLicenseRequest: rd.CheckRiderLicenseRequest(
           licenseNumber: licenseNumber.trim(),
         ),
+        extra: commandOptions(key).extra,
       ),
     );
     return res.data?.available ??
         (throw const ContractViolationFailure('license-checks 본문 없음'));
   }
 
-  /// 가입 전 확인 API 가 없다 — 가입 때 서버가 확인한다.
   @override
-  Future<bool?> isPhoneAvailable(String phone) async => null;
+  Future<bool?> isPhoneAvailable(String phone) async {
+    final key = IdempotencyKey.generate();
+    try {
+      final res = await pmartGuard(
+        () => _signup.checkRiderPhone(
+          checkRiderPhoneRequest: rd.CheckRiderPhoneRequest(phone: phone),
+          extra: commandOptions(key).extra,
+        ),
+      );
+      return res.data?.available ??
+          (throw const ContractViolationFailure('phone-checks 본문 없음'));
+    } on PmartFailure catch (f) {
+      if (_notDeployed(f)) return null;
+      rethrow;
+    }
+  }
 
-  /// 확인 API 가 없다.
   @override
   Future<bool?> isAccountAvailable(
-    String bankName,
+    String bankCode,
     String accountNumber,
-  ) async => null;
+  ) async {
+    final key = IdempotencyKey.generate();
+    try {
+      final res = await pmartGuard(
+        () => _signup.checkRiderAccount(
+          checkRiderAccountRequest: rd.CheckRiderAccountRequest(
+            bankCode: bankCode,
+            accountNumber: accountNumber,
+          ),
+          extra: commandOptions(key).extra,
+        ),
+      );
+      return res.data?.available ??
+          (throw const ContractViolationFailure('account-checks 본문 없음'));
+    } on PmartFailure catch (f) {
+      if (_notDeployed(f)) return null;
+      rethrow;
+    }
+  }
+
+  @override
+  Future<List<BankOption>> banks() async {
+    try {
+      final res = await pmartGuard(() => _signup.listBankCodes());
+      final items = [
+        for (final b
+            in res.data?.items ??
+                const <rd.ListBankCodes200ResponseItemsInner>[])
+          (code: b.code, name: b.name),
+      ];
+      return items.isEmpty ? SignupOptions.banks : items;
+    } on PmartFailure catch (f) {
+      // 배포 전이면 앱 목록(같은 금융결제원 코드). 그 밖의 실패는 화면이 안내한다.
+      if (_notDeployed(f)) return SignupOptions.banks;
+      rethrow;
+    }
+  }
 }
 
 rd.VehicleType vehicleToContract(Vehicle v) => switch (v) {

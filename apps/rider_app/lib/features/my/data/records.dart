@@ -85,7 +85,8 @@ class DeliveryRecord {
 /// 내역·수행료·운행시간.
 ///
 /// 실서버: 내 배송 `GET /riders/me/deliveries`, 수행료 `GET /riders/me/earnings`(delivery-execution 0.3+).
-/// 운행시간은 계약 경로가 없어 실서버에서는 "확인 불가"로 보인다.
+/// 운행시간 `GET /riders/me/operating-time`(execution 0.11.0) — 배차 수락 ~ 전달 완료, 겹친 시간은 한 번.
+/// 그 경로가 아직 없는 서버(404·405·501)면 "확인 불가"로 보인다.
 abstract interface class RecordsRepository {
   Future<TodaySummary> today();
   Future<OperatingTime> operatingTime();
@@ -235,10 +236,42 @@ final class ApiRecordsRepository implements RecordsRepository {
     );
   }
 
+  static DateTime _parseDate(String s) => DateTime.parse(s);
+
+  static Duration _secs(int s) => Duration(seconds: s);
+
+  /// 오늘(서버 기본 = 한국 날짜 오늘)과 이번 주(월~일) 두 번 묻는다. 날짜는 한국 자정 기준.
   @override
-  Future<OperatingTime> operatingTime() async => throw const ProblemFailure(
-    Problem(status: 501, code: ProblemCode.unsupportedAction),
-  );
+  Future<OperatingTime> operatingTime() async {
+    final today = await pmartGuard(() => _me.getMyOperatingTime());
+    final t =
+        today.data ??
+        (throw const ContractViolationFailure('operating-time 본문 없음'));
+    final day = _parseDate(t.from);
+    final weekStart = day.subtract(Duration(days: day.weekday - 1));
+    final weekEnd = weekStart.add(const Duration(days: 6));
+    final week = await pmartGuard(
+      () => _me.getMyOperatingTime(from: _ymd(weekStart), to: _ymd(weekEnd)),
+    );
+    final w =
+        week.data ??
+        (throw const ContractViolationFailure('operating-time 본문 없음'));
+    return OperatingTime(
+      today: day,
+      todayTotal: _secs(t.totalSeconds),
+      weekStart: weekStart,
+      weekEnd: weekEnd,
+      weekTotal: _secs(w.totalSeconds),
+      days: [
+        for (final d in w.days)
+          if (d.seconds > 0) (day: _parseDate(d.date), total: _secs(d.seconds)),
+      ],
+    );
+  }
+
+  static String _ymd(DateTime d) =>
+      '${d.year.toString().padLeft(4, '0')}-'
+      '${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
 
   @override
   Future<List<Settlement>> settlements() async {
@@ -269,10 +302,16 @@ final class ApiRecordsRepository implements RecordsRepository {
       for (final d in res.data?.items ?? const <ex.DeliveryExecution>[])
         if (d.state == ex.ExecutionState.COMPLETED)
           DeliveryRecord(
-            code: d.orderId ?? d.deliveryId ?? '-',
-            store: d.mfcId ?? '-',
-            completedAt: d.completedAt ?? d.assignedAt ?? DateTime.now(),
+            // 주문번호·마트 이름(execution 0.11.0 — 그 배포 뒤 배정부터). 없으면 예전 값.
+            code: d.orderNumber ?? d.orderId ?? d.deliveryId ?? '-',
+            store: d.mfcName ?? d.mfcId ?? '-',
+            completedAt: (d.completedAt ?? d.assignedAt ?? DateTime.now())
+                .toLocal(),
             fee: (d.earning?.calculable ?? false) ? d.earning?.total : null,
+            // 소요시간 = 배정 ~ 완료(서버 시각 그대로 뺀 표시값).
+            minutes: d.assignedAt != null && d.completedAt != null
+                ? d.completedAt!.difference(d.assignedAt!).inMinutes
+                : null,
           ),
     ];
   }

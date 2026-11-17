@@ -10,7 +10,9 @@ import '../data/withdrawal.dart';
 
 String blockerText(AppLocalizations l10n, WithdrawalBlocker b) => switch (b) {
   WithdrawalBlocker.activeDelivery => l10n.wdBlockDelivery,
-  WithdrawalBlocker.unsettled => l10n.wdBlockSettle,
+  WithdrawalBlocker.unconfirmedEarning => l10n.wdBlockSettle,
+  WithdrawalBlocker.earningAdjustment => l10n.wdBlockAdjust,
+  WithdrawalBlocker.openHelpRequest => l10n.wdBlockHelp,
   WithdrawalBlocker.restrictionReview => l10n.wdBlockReview,
   WithdrawalBlocker.other => l10n.wdBlockOther,
 };
@@ -76,14 +78,28 @@ class _WithdrawScreenState extends ConsumerState<WithdrawScreen> {
       final key = _key ??= IdempotencyKey.generate();
       _requestId ??= await repo.request(reason: _reason.text, key: key);
       await _check();
-    } on UnknownResultFailure catch (f) {
+    } on WithdrawalBlockedFailure catch (f) {
+      // 막힘(409 INVALID_STATE + 사유). 같은 키로 다시 내면 서버가 다시 검사한다(백엔드 회신 2026-11-17).
       if (!mounted) return;
-      // 501 = 서버에 아직 탈퇴 기능이 없다(계약만 있음). 결과 불명이 아니다 — 다시 눌러도 같다.
-      final notReady = (f.problem?.status ?? f.httpStatus) == 501;
       setState(() {
         _busy = false;
-        if (notReady) _key = null;
-        _note = notReady ? l10n.wdNotReady : l10n.wdUnknown;
+        _requestId = null;
+        _blockers = f.blockers;
+        _note = l10n.wdBlocked;
+      });
+    } on UnknownResultFailure catch (f) {
+      if (!mounted) return;
+      // 501 = 서버에 아직 탈퇴 기능이 없다(배포 전). 503 = 서버 장애로 아무 것도 바뀌지 않았다 —
+      // 둘 다 결과 불명이 아니다(회신: "잠시 뒤 다시" — 결과를 모른다고 하지 않는다).
+      final status = f.problem?.status ?? f.httpStatus;
+      setState(() {
+        _busy = false;
+        if (status == 501) _key = null;
+        _note = switch (status) {
+          501 => l10n.wdNotReady,
+          503 => l10n.wdRetryLater,
+          _ => l10n.wdUnknown,
+        };
       });
     } on ProblemFailure catch (f) {
       if (!mounted) return;

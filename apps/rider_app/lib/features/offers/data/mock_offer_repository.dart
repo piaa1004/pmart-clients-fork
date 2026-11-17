@@ -38,6 +38,24 @@ base class MockOfferRepository implements OfferRepository, DutyRepository {
           },
         });
       }
+      // 반품 회수 제안 1건(dlv-r1): 거리 = 회수지 → MFC, 주소는 수락 뒤.
+      _offers.add({
+        ...(fixture['items']! as List).first as Map<String, Object?>,
+        'offerId': 'offer-return-1',
+        'deliveryId': 'dlv-r1',
+        'remainingSec': 60,
+        'deliveryType': 'RETURN',
+        'purpose': 'CLAIM_RETURN',
+        'summary': <String, Object?>{
+          ...((fixture['items']! as List).first as Map)['summary']
+              as Map<String, Object?>,
+          'dropAreaLabel': '부산진구 가야동',
+          'distanceKm': 2.4,
+          'estimatedFee': 3500,
+          'bagCount': null,
+          'deliveryMode': 'SINGLE',
+        },
+      });
     }
     if (!startOnDuty) {
       _duty = {..._duty, 'status': 'OFF_DUTY', 'newDispatchEnabled': false};

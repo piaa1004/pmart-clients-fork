@@ -1,5 +1,7 @@
 import 'package:flutter/foundation.dart';
 
+import '../../delivery/domain/delivery.dart' show RecoveryPurpose;
+
 /// `GET /offers` 결과(화면용).
 @immutable
 class OfferList {
@@ -38,7 +40,11 @@ class OfferItem {
     this.bundleId,
     this.bundleSize,
     this.stopSequence,
+    this.recovery,
   });
+
+  /// 회수 배송 제안이면 목적(반품 회수·오배송 회수). 거리 = 회수지 → MFC.
+  final RecoveryPurpose? recovery;
 
   final String offerId;
 

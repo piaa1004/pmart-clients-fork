@@ -1,12 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:pmart_core/pmart_core.dart';
 
 import '../../../l10n/gen/app_localizations.dart';
 import '../../../shared/rider_style.dart';
 import '../../../shared/rider_widgets.dart';
 import '../domain/delivery.dart';
 import 'delivery_controller.dart';
+import 'delivery_texts.dart';
 import 'phone_caller.dart';
 import 'photo_box.dart';
 
@@ -23,16 +25,23 @@ String failureReasonText(AppLocalizations l10n, FailureReason r) => switch (r) {
 /// 전달할 수 없어요(도움요청 메뉴에서): 사유 · 고객 연락(고객 사유면 2번 이상) · 증빙 사진 → 알리기.
 /// 운영자가 확정하기 전까지 배송은 진행 중(FAILURE_REPORTED)이다. 서버가 최종 판정한다.
 class FailureScreen extends ConsumerStatefulWidget {
-  const FailureScreen({super.key, required this.deliveryId});
+  const FailureScreen({
+    super.key,
+    required this.deliveryId,
+    this.initialReason,
+  });
 
   final String deliveryId;
+
+  /// 지원센터 갈림길에서 고른 문제에 맞춘 사유(고객 연락 안 됨 → 연락 안 됨, 주소 문제 → 주소 오류).
+  final FailureReason? initialReason;
 
   @override
   ConsumerState<FailureScreen> createState() => _FailureScreenState();
 }
 
 class _FailureScreenState extends ConsumerState<FailureScreen> {
-  FailureReason? _reason;
+  late FailureReason? _reason = widget.initialReason;
   bool _sending = false;
 
   String get _id => widget.deliveryId;
@@ -44,7 +53,22 @@ class _FailureScreenState extends ConsumerState<FailureScreen> {
     final l10n = AppLocalizations.of(context);
     setState(() => _sending = true);
     final flow = ref.read(deliveryFlowProvider(_id).notifier);
-    await flow.reportFailure(reason);
+    // 앞에서 고른 문제·사유·연락·사진을 한 글로 — 실패 등록 detail 로 보내고, 대화의 첫 말로도 보인다
+    // (라이더가 대화에서 같은 내용을 다시 쓰지 않게, 사용자 요청 2026-11-17).
+    final s = ref.read(deliveryFlowProvider(_id));
+    // 예: 고객과 연락이 안 돼요 → 전달할 수 없어요 / 사유: 연락 안 됨 / 시도: 전화 2번 (사진은 대화의 "사진" 버튼).
+    final summary = [
+      switch (widget.initialReason) {
+        final r? => l10n.failureFrom(
+          helpCategoryText(l10n, helpCategoryForFailure(r)),
+        ),
+        null => l10n.failureOnly,
+      },
+      l10n.failureHelpDetail(failureReasonText(l10n, reason)),
+      if (s.contacts.isNotEmpty) l10n.failureTries(s.contacts.length),
+    ].join('\n');
+    final photo = s.photo;
+    await flow.reportFailure(reason, detail: summary);
     if (!mounted) return;
     final d = await ref.read(deliveryProvider(_id).future);
     if (!mounted) return;
@@ -52,13 +76,35 @@ class _FailureScreenState extends ConsumerState<FailureScreen> {
       setState(() => _sending = false);
       return;
     }
-    final photo = ref.read(deliveryFlowProvider(_id)).photoRef;
+    // 서버가 실패 등록과 함께 대화를 열었다(execution 0.14.0) — 그 대화로 간다.
+    // 도움요청을 따로 보내면 운영자 쪽에 두 건이 생긴다(백엔드 회신 2026-11-17 §13).
+    final opened = d.failureHelpRequestId;
+    if (opened != null) {
+      // 배송이 FAILURE_REPORTED 로 바뀐 것 = 서버가 신고를 받았다 → 접수됨으로 넣고 대화로.
+      ref
+          .read(helpFlowProvider(_id).notifier)
+          .adopt(
+            HelpTicket(
+              key: IdempotencyKey(opened),
+              category: HelpCategory.deliveryFailure,
+              detail: summary,
+              sentAt: DateTime.now(),
+              state: HelpState.open,
+              photo: photo,
+            ),
+          );
+      context.pushReplacement('/deliveries/$_id/support/$opened');
+      return;
+    }
+    // 그 전 서버: 같은 내용으로 도움요청을 따로 연다.
+    final photoRef = ref.read(deliveryFlowProvider(_id)).photoRef;
     await ref
         .read(helpFlowProvider(_id).notifier)
         .send(
           helpCategoryForFailure(reason),
-          detail: l10n.failureHelpDetail(failureReasonText(l10n, reason)),
-          evidenceRefs: [?photo],
+          detail: summary,
+          evidenceRefs: [?photoRef],
+          photo: photo,
         );
     if (!mounted) return;
     final last = ref.read(helpFlowProvider(_id)).last;
@@ -74,7 +120,12 @@ class _FailureScreenState extends ConsumerState<FailureScreen> {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
     final flow = ref.watch(deliveryFlowProvider(_id));
-    final phone = ref.watch(dropInfoProvider(_id)).value?.receiverPhone;
+    // 회수 배송은 회수지 전화(전달지는 쓰지 않는다).
+    final recovery =
+        ref.watch(deliveryProvider(_id)).value?.isRecovery ?? false;
+    final phone = recovery
+        ? ref.watch(recoveryContactProvider(_id)).value?.receiverPhone
+        : ref.watch(dropInfoProvider(_id)).value?.receiverPhone;
     final reason = _reason;
     final needContacts = reason != null && needsContactAttempts(reason);
     final contactsOk = !needContacts || flow.contacts.length >= 2;

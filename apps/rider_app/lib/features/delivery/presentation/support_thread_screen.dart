@@ -1,11 +1,13 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart' show Uint8List;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../l10n/gen/app_localizations.dart';
 import '../../../shared/rider_style.dart';
 import '../../../shared/rider_widgets.dart';
+import '../data/delivery_repository.dart' show LocalPhoto;
 import '../domain/delivery.dart';
 import 'delivery_controller.dart';
 import 'delivery_texts.dart';
@@ -41,6 +43,10 @@ class _SupportThreadScreenState extends ConsumerState<SupportThreadScreen> {
   void initState() {
     super.initState();
     Future.microtask(_load);
+    // 접수 상태(접수됨·처리 중·접수번호)를 새로 확인한다 — 전달 불가 신고가 연 대화도 여기서 잡힌다.
+    Future.microtask(
+      () => ref.read(helpFlowProvider(widget.deliveryId).notifier).refresh(),
+    );
     _poll = Timer.periodic(const Duration(seconds: 4), (_) => _load());
   }
 
@@ -87,6 +93,9 @@ class _SupportThreadScreenState extends ConsumerState<SupportThreadScreen> {
               padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
               children: [
                 for (final m in thread.messages.reversed) _Bubble(message: m),
+                // 처음 보낸 요청(고른 문제·내용)을 내 첫 말로 보인다 — 다시 쓰지 않아도 된다(사용자 요청 2026-11-17).
+                if (ticket != null)
+                  _RequestBubble(ticket: ticket, deliveryId: widget.deliveryId),
                 _Notice(
                   text: thread.unavailable
                       ? l10n.supportThreadUnavailable
@@ -160,7 +169,7 @@ class _SupportThreadScreenState extends ConsumerState<SupportThreadScreen> {
   }
 }
 
-/// 요청 요약: 유형 · 보낸 시각 · 처리 상태 · 접수번호 · 처음 보낸 내용.
+/// 요청 요약: 유형 · 보낸 시각 · 처리 상태 · 접수번호(처음 보낸 내용은 대화의 첫 말로).
 class _TicketHeader extends StatelessWidget {
   const _TicketHeader({required this.ticket});
 
@@ -199,11 +208,6 @@ class _TicketHeader extends StatelessWidget {
             ].join(' · '),
             style: const TextStyle(fontSize: 13, color: RiderColors.sub),
           ),
-          if (ticket.detail case final detail?)
-            Padding(
-              padding: const EdgeInsets.only(top: 6),
-              child: Text(detail, style: const TextStyle(fontSize: 14)),
-            ),
         ],
       ),
     );
@@ -303,6 +307,174 @@ class _Bubble extends StatelessWidget {
         ),
       ),
     );
+  }
+}
+
+/// 처음 보낸 요청(내 첫 말): 고른 문제·내용 + 함께 보낸 사진("사진"을 누르면 크게).
+/// 이 기기에서 찍은 사진이 메모리에 없으면(앱을 다시 켬) 서버에서 다시 받아 그린다(디스크에 남기지 않는다).
+class _RequestBubble extends ConsumerWidget {
+  const _RequestBubble({required this.ticket, required this.deliveryId});
+
+  final HelpTicket ticket;
+  final String deliveryId;
+
+  void _showPhoto(BuildContext context, {LocalPhoto? local, String? ref}) {
+    final l10n = AppLocalizations.of(context);
+    showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        key: const ValueKey('request-photo-view'),
+        title: Text(l10n.supportPhotoTitle),
+        contentPadding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+        content: ClipRRect(
+          borderRadius: BorderRadius.circular(6),
+          child: local != null
+              ? _PhotoBytes(local.bytes)
+              : _ServerPhoto(deliveryId: deliveryId, photoRef: ref!),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: Text(l10n.ok),
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final l10n = AppLocalizations.of(context);
+    // 전달 불가 신고는 내용 첫 줄이 고른 문제다(유형 이름을 또 붙이지 않는다).
+    final text = [
+      if (ticket.category != HelpCategory.deliveryFailure)
+        helpCategoryText(l10n, ticket.category),
+      ?ticket.detail,
+    ].join('\n');
+    final photo = ticket.photo;
+    // 메모리 사진이 없으면 서버에 올린 사진 참조를 읽는다(못 읽으면 버튼 없이).
+    final refs = photo != null
+        ? const <String>[]
+        : ref
+                  .watch(
+                    requestPhotoRefsProvider((
+                      deliveryId: deliveryId,
+                      requestId: ticket.key.value,
+                    )),
+                  )
+                  .value ??
+              const <String>[];
+    return Align(
+      alignment: Alignment.centerRight,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 4),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: [
+            ConstrainedBox(
+              constraints: BoxConstraints(
+                maxWidth: MediaQuery.sizeOf(context).width * 0.72,
+              ),
+              child: Container(
+                key: const ValueKey('msg-request'),
+                padding: const EdgeInsets.fromLTRB(12, 9, 12, 9),
+                decoration: BoxDecoration(
+                  color: RiderColors.primary,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      text,
+                      style: const TextStyle(
+                        fontSize: 15,
+                        height: 1.4,
+                        color: Colors.white,
+                      ),
+                    ),
+                    if (photo != null || refs.isNotEmpty) ...[
+                      const SizedBox(height: 8),
+                      OutlinedButton.icon(
+                        key: const ValueKey('request-photo'),
+                        onPressed: () => _showPhoto(
+                          context,
+                          local: photo,
+                          ref: refs.firstOrNull,
+                        ),
+                        icon: const Icon(Icons.photo_outlined, size: 18),
+                        label: Text(l10n.supportPhoto),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: Colors.white,
+                          side: const BorderSide(color: Colors.white),
+                          visualDensity: VisualDensity.compact,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.only(top: 2, left: 4, right: 4),
+              child: Text(
+                clockText(ticket.sentAt),
+                style: const TextStyle(fontSize: 11, color: RiderColors.hint),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _PhotoBytes extends StatelessWidget {
+  const _PhotoBytes(this.bytes);
+
+  final Uint8List bytes;
+
+  @override
+  Widget build(BuildContext context) => Image.memory(
+    bytes,
+    fit: BoxFit.contain,
+    gaplessPlayback: true,
+    errorBuilder: (_, _, _) => const SizedBox(
+      height: 120,
+      child: Center(child: Icon(Icons.broken_image_outlined)),
+    ),
+  );
+}
+
+/// 서버에 올린 사진(원본). 읽는 중 · 못 읽음을 구분한다.
+class _ServerPhoto extends ConsumerWidget {
+  const _ServerPhoto({required this.deliveryId, required this.photoRef});
+
+  final String deliveryId;
+  final String photoRef;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final a = ref.watch(
+      evidencePhotoProvider((deliveryId: deliveryId, photoRef: photoRef)),
+    );
+    return switch (a) {
+      AsyncData(:final value) => _PhotoBytes(value),
+      AsyncError() => SizedBox(
+        height: 120,
+        child: Center(
+          child: Text(
+            AppLocalizations.of(context).supportPhotoFailed,
+            key: const ValueKey('request-photo-failed'),
+            style: const TextStyle(color: RiderColors.sub),
+          ),
+        ),
+      ),
+      _ => const SizedBox(
+        height: 120,
+        child: Center(child: CircularProgressIndicator()),
+      ),
+    };
   }
 }
 

@@ -47,6 +47,29 @@ final supportThreadRepositoryProvider = Provider<SupportThreadRepository>(
   },
 );
 
+final evidencePhotoViewerProvider = Provider<EvidencePhotoViewer>(
+  (ref) => switch (ref.watch(envProvider)) {
+    PmartEnv.mock => ref.watch(_mockDelivery),
+    PmartEnv.local => ApiEvidencePhotoViewer(ref.watch(dioProvider)),
+  },
+);
+
+/// 도움요청에 올린 사진 참조(앱을 다시 켜도 서버에서).
+final requestPhotoRefsProvider = FutureProvider.autoDispose
+    .family<List<String>, ({String deliveryId, String requestId})>(
+      (ref, k) => ref
+          .watch(evidencePhotoViewerProvider)
+          .requestPhotoRefs(k.deliveryId, k.requestId),
+    );
+
+/// 사진 원본(메모리에만 — 화면을 나가면 지운다).
+final evidencePhotoProvider = FutureProvider.autoDispose
+    .family<Uint8List, ({String deliveryId, String photoRef})>(
+      (ref, k) => ref
+          .watch(evidencePhotoViewerProvider)
+          .photo(k.deliveryId, k.photoRef),
+    );
+
 final evidenceUploaderProvider = Provider<EvidenceUploader>(
   (ref) => switch (ref.watch(envProvider)) {
     PmartEnv.mock => ref.watch(_mockDelivery),
@@ -82,6 +105,12 @@ final deliveryProvider = FutureProvider.autoDispose
 final myActiveDeliveriesProvider =
     FutureProvider.autoDispose<List<DeliveryView>>(
       (ref) => ref.watch(deliveryRepositoryProvider).myActive(),
+    );
+
+/// 회수지 연락처·주소(개인정보). autoDispose — 화면을 나가면 메모리에서 지운다.
+final recoveryContactProvider = FutureProvider.autoDispose
+    .family<RecoveryContactView, String>(
+      (ref, id) => ref.watch(deliveryRepositoryProvider).recoveryContact(id),
     );
 
 /// 전달지(개인정보). autoDispose — 화면을 나가면 메모리에서 지운다.
@@ -351,6 +380,14 @@ class DeliveryFlowController extends Notifier<DeliveryFlowState> {
   }
 
   static bool _reached(String kind, ExecutionState s) {
+    // 회수: 받음 → RETURN_PICKED_UP(→ 반납 RETURNED_TO_STORE).
+    if (kind == DeliveryCommandKind.returnPickup) {
+      return s == ExecutionState.returnPickedUp ||
+          s == ExecutionState.returnedToStore;
+    }
+    if (kind == DeliveryCommandKind.returnToStore) {
+      return s == ExecutionState.returnedToStore;
+    }
     const order = [
       ExecutionState.assigned,
       ExecutionState.arrivedAtStore,
@@ -381,6 +418,19 @@ class DeliveryFlowController extends Notifier<DeliveryFlowState> {
 
   Future<void> arriveAtCustomer() =>
       _send(DeliveryCommandKind.customerArrival, const {});
+
+  /// 회수: 회수지에서 받았다. 올린 사진이 있어야 한다(서버가 1장 이상 확인 — 422 EVIDENCE_REQUIRED).
+  Future<void> returnPickup() {
+    final photo = state.photoRef;
+    if (photo == null) return Future.value();
+    return _send(DeliveryCommandKind.returnPickup, {
+      'evidenceRefs': [photo],
+    });
+  }
+
+  /// 회수: MFC 에 반납했다(배송 끝 — 수행료).
+  Future<void> returnToStore() =>
+      _send(DeliveryCommandKind.returnToStore, const {});
 
   /// 사진 올리기 키. 같은 사진을 다시 올릴 때만 같은 키다(새로 찍으면 새 키).
   IdempotencyKey? _photoKey;
@@ -496,7 +546,11 @@ class HelpTicket {
     this.detail,
     this.state,
     this.caseId,
+    this.photo,
   });
+
+  /// 함께 보낸 사진(이 기기에서 찍은 것 — 메모리에만, 대화에서 "사진"을 누르면 보인다).
+  final LocalPhoto? photo;
 
   /// 요청 ID(= 멱등 키). 같은 요청을 다시 보낼 때만 같은 키다.
   final IdempotencyKey key;
@@ -517,6 +571,7 @@ class HelpTicket {
     detail: detail,
     state: s.state,
     caseId: s.caseId ?? caseId,
+    photo: photo,
   );
 }
 
@@ -559,6 +614,7 @@ class HelpFlowController extends Notifier<HelpFlowState> {
     HelpCategory category, {
     String? detail,
     List<String>? evidenceRefs,
+    LocalPhoto? photo,
   }) async {
     if (state.sending) return;
     final text = detail?.trim();
@@ -576,6 +632,7 @@ class HelpFlowController extends Notifier<HelpFlowState> {
             category: category,
             detail: note,
             sentAt: DateTime.now(),
+            photo: photo,
           );
     final others = retry
         ? state.tickets.sublist(0, state.tickets.length - 1)
@@ -603,6 +660,16 @@ class HelpFlowController extends Notifier<HelpFlowState> {
     // 접수 응답을 끝내 못 받았어도 상태 조회로 확인한다(새 요청을 만들지 않는다).
     final s = await repo.helpStatus(deliveryId, ticket.key);
     if (ref.mounted) _replace(ticket.withStatus(s), sending: false);
+  }
+
+  /// 서버가 대신 연 도움요청(전달 불가 신고가 연 대화, execution 0.14.0)을 이 배송의 요청으로 넣는다.
+  /// 이미 있으면 그대로 둔다.
+  void adopt(HelpTicket t) {
+    if (state.tickets.any((x) => x.key.value == t.key.value)) return;
+    state = HelpFlowState(
+      tickets: [...state.tickets, t],
+      sending: state.sending,
+    );
   }
 
   /// 아직 처리되지 않은 도움요청의 상태를 다시 조회한다.

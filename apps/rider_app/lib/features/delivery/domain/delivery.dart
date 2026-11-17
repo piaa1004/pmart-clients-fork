@@ -48,7 +48,28 @@ class DeliveryView {
     required this.handoverIds,
     this.orderId,
     this.mfcId,
+    this.failureHelpRequestId,
+    this.resumeRequestedAt,
+    this.recovery,
+    this.returnLines = const [],
+    this.recoveryOrigin,
+    this.mfcPhone,
   });
+
+  /// 회수 배송(type RETURN)이면 목적 — 받는 곳(회수지) → 두는 곳(MFC). 일반 배송은 null.
+  /// 반품 회수·오배송 회수는 문구만 다르고 단계는 같다(백엔드 요청 2026-11-17 회수 화면 한 벌).
+  final RecoveryPurpose? recovery;
+
+  /// 받을 품목(반품 회수 — claim 이 요청한 줄·수량). 이름은 주문 요약에서 붙인다.
+  final List<ReturnItem> returnLines;
+
+  /// 오배송 회수: 원래 놓은 곳(완료 때 기록).
+  final RecoveryOrigin? recoveryOrigin;
+
+  /// 지점 전화(서버 값, 등록 안 됐으면 null — 버튼을 숨긴다).
+  final String? mfcPhone;
+
+  bool get isRecovery => recovery != null;
 
   final String deliveryId;
   final int version;
@@ -56,11 +77,66 @@ class DeliveryView {
   final String? orderId;
   final String? mfcId;
 
+  /// 전달 불가 등록이 함께 연 지원센터 대화(도움요청 ID, execution 0.14.0). 그 전 서버·등록이면 null.
+  final String? failureHelpRequestId;
+
+  /// 전달 재개 요청을 보낸 시각(운영자 반려 대기). 없으면 null.
+  final DateTime? resumeRequestedAt;
+
   /// 이 배송의 포장. 포장마다 스캔해야 한다.
   final List<String> packageIds;
 
   /// 서버가 확정한 인계(HandoverFact). 픽업 완료에 전부 필요하다.
   final List<String> handoverIds;
+}
+
+/// 회수 배송 목적(문구만 바꾼다).
+enum RecoveryPurpose { claimReturn, misdeliveryRecovery, other }
+
+RecoveryPurpose? recoveryPurposeFrom({String? type, String? purpose}) {
+  if (type != 'RETURN') return null;
+  return switch (purpose) {
+    'CLAIM_RETURN' => RecoveryPurpose.claimReturn,
+    'MISDELIVERY_RECOVERY' => RecoveryPurpose.misdeliveryRecovery,
+    _ => RecoveryPurpose.other,
+  };
+}
+
+/// 회수할 품목 한 줄(이름은 주문 요약과 맞을 때만).
+typedef ReturnItem = ({String? name, int qty});
+
+/// 오배송 회수 — 원래 배송이 놓은 곳.
+typedef RecoveryOrigin = ({String? placement, String? detail, int photoCount});
+
+/// 회수지 연락처(`GET /deliveries/{id}/recovery-contact`). 전화는 늘 있고, 주소는 반품 회수만(오배송은 null).
+/// 좌표는 배차 정보(`recovery.pickup`). 개인정보 — 디스크·로그에 남기지 않는다.
+@immutable
+class RecoveryContactView {
+  const RecoveryContactView({
+    required this.receiverPhone,
+    this.receiverName,
+    this.roadAddress,
+    this.detailAddress,
+    this.entranceMethod,
+    this.entranceNote,
+    this.lat,
+    this.lng,
+  });
+
+  final String receiverPhone;
+  final String? receiverName;
+  final String? roadAddress;
+  final String? detailAddress;
+  final EntranceMethod? entranceMethod;
+  final String? entranceNote;
+  final double? lat;
+  final double? lng;
+
+  String? get addressLine => switch ((roadAddress, detailAddress)) {
+    (final r?, final d?) when d.isNotEmpty => '$r $d',
+    (final r?, _) => r,
+    _ => null,
+  };
 }
 
 /// 출입 방법(`DropInfo.entranceMethod`).
@@ -230,6 +306,12 @@ abstract final class DeliveryCommandKind {
   static const customerArrival = 'customer-arrival';
   static const completion = 'completion';
   static const failure = 'failure';
+
+  /// 회수: 회수지에서 받음(사진) → RETURN_PICKED_UP.
+  static const returnPickup = 'return-pickup';
+
+  /// 회수: MFC 반납 → RETURNED_TO_STORE.
+  static const returnToStore = 'return-store-delivery';
 }
 
 abstract final class HandoverProblemCode {
@@ -259,6 +341,9 @@ enum HelpCategory {
   /// 상태 정정(잘못 누름 등)
   statusCorrection,
   other,
+
+  /// 전달 불가 신고가 연 대화(execution 0.14.0 DELIVERY_FAILURE). 라이더가 고르는 유형이 아니다.
+  deliveryFailure,
 }
 
 /// 도움요청 처리 상태. 접수 ≠ 해결.

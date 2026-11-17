@@ -136,5 +136,14 @@
 - 요청: 서버 요율표(`CONFIG_REQUIRED` 의 그 요율)를 라이더에게 보여 줄 조회 API(예: `GET /riders/fee-schedule` — 수단·거리 구간·금액·적용 지역·버전). 요율이 바뀌면 앱 표가 틀리므로 서버 값을 받고 싶다.
 - 동의 기록이 필요하면 가입 `consents[]` 에 받을 consentType(예: `FEE_SCHEDULE`)도 정해 달라. 앱은 지금 동의 여부를 화면에서만 확인하고 서버로 보내지 않는다.
 
+## 19. 배송 밖 실시간 채팅 상담 (2026-11-17 추가)
+- 사용자 요청: "마이페이지 지원센터 문의에 실시간 채팅 상담도 있었으면."
+- 지금 계약에서 배송 밖 문의(case `/inquiries`)는 라이더가 한 번 남기면 지원센터(RIDER_OPS)가 `replies` 로 답하는 방식뿐이다. 라이더가 이어 쓰는 경로가 없어서 채팅이 안 된다. 배송 건 대화(`/deliveries/{id}/help-requests/{id}/messages`)는 배송 ID 가 있어야 한다.
+- 앱(목으로 반영): 지원센터 문의 맨 위에 "실시간 채팅 상담" → 대화 화면(3초마다 확인, 같은 키 재전송은 같은 메시지). 실서버는 "준비 중 — 문의를 남겨 주세요"로 안내한다.
+- 요청(둘 중 하나):
+  1. 문의 한 건에 딸린 메시지: `GET/POST /inquiries/{inquiryId}/messages`(라이더 본인 + RIDER_OPS, `after` seq, 닫힌 문의는 409). 도움요청 대화와 같은 모양이다.
+  2. 문의 없이 여는 상담 세션: `POST /rider-support/chats` → `{chatId}` + 같은 메시지 API. 상담원 배정·대기 순서·운영 시간 밖 안내를 포함한다.
+- 상담원 쪽 화면(백오피스, PC 2)과 새 메시지 알림(알림함 CASE)도 함께 필요하다.
+
 ## 참고 — 사용자 질문에 앱이 답한 것
 - "도움요청은 백엔드 어디서 확인·처리하나": 백오피스 사건함(`/cases?kind=RIDER_HELP`, case-service)에서 집기·닫기, 라이더가 쓴 내용·사진은 `GET /deliveries/{id}/help-requests/{requestId}` (백엔드 안내 2026-11-16 `backoffice/…-notice-rider-delivery-staff-apis.md`).

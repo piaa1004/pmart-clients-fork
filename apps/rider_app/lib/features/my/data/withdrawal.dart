@@ -8,24 +8,34 @@ import '../../offers/presentation/offer_controllers.dart';
 
 enum WithdrawalState { pending, completed, rejected, unknown }
 
-/// 탈퇴할 수 없는 사유(서버 `blockers` — 값 목록이 계약에 정해져 있지 않아 글자로 대략 나눈다).
-enum WithdrawalBlocker { activeDelivery, unsettled, restrictionReview, other }
+/// 탈퇴할 수 없는 사유(rider-service 0.6.0 `WithdrawalBlocker` — 백엔드 회신 2026-11-17).
+enum WithdrawalBlocker {
+  activeDelivery,
+  unconfirmedEarning,
+  earningAdjustment,
+  openHelpRequest,
+  restrictionReview,
+  other,
+}
 
 typedef WithdrawalStatus = ({
   WithdrawalState state,
   List<WithdrawalBlocker> blockers,
 });
 
-WithdrawalBlocker blockerFromWire(String s) {
-  final u = s.toUpperCase();
-  if (u.contains('DELIVER')) return WithdrawalBlocker.activeDelivery;
-  if (u.contains('SETTLE') || u.contains('EARNING') || u.contains('PAY')) {
-    return WithdrawalBlocker.unsettled;
-  }
-  if (u.contains('RESTRICT') || u.contains('REVIEW')) {
-    return WithdrawalBlocker.restrictionReview;
-  }
-  return WithdrawalBlocker.other;
+WithdrawalBlocker blockerFromWire(String s) => switch (s) {
+  'ACTIVE_DELIVERY' => WithdrawalBlocker.activeDelivery,
+  'UNCONFIRMED_EARNING' => WithdrawalBlocker.unconfirmedEarning,
+  'EARNING_ADJUSTMENT_PENDING' => WithdrawalBlocker.earningAdjustment,
+  'OPEN_HELP_REQUEST' => WithdrawalBlocker.openHelpRequest,
+  'RESTRICTION_REVIEW' => WithdrawalBlocker.restrictionReview,
+  _ => WithdrawalBlocker.other,
+};
+
+/// 409 INVALID_STATE 의 막는 사유(problem `details` = `[{field: blockers, reason: <코드>}]`).
+class WithdrawalBlockedFailure implements Exception {
+  const WithdrawalBlockedFailure(this.blockers);
+  final List<WithdrawalBlocker> blockers;
 }
 
 /// 계정 탈퇴(rider-service `POST /riders/me/withdrawals` → `GET …/{requestId}`).
@@ -44,18 +54,31 @@ final class ApiWithdrawalRepository implements WithdrawalRepository {
 
   @override
   Future<String> request({String? reason, required IdempotencyKey key}) async {
-    final res = await pmartGuard(
-      () => _me.createMyWithdrawal(
-        idempotencyKey: key.value,
-        xSourceSystem: sourceSystem,
-        createMyWithdrawalRequest: rd.CreateMyWithdrawalRequest(
-          reason: reason == null || reason.trim().isEmpty
-              ? null
-              : reason.trim(),
+    final Response<rd.CreateMyWithdrawal202Response> res;
+    try {
+      res = await pmartGuard(
+        () => _me.createMyWithdrawal(
+          idempotencyKey: key.value,
+          xSourceSystem: sourceSystem,
+          createMyWithdrawalRequest: rd.CreateMyWithdrawalRequest(
+            reason: reason == null || reason.trim().isEmpty
+                ? null
+                : reason.trim(),
+          ),
+          extra: commandOptions(key).extra,
         ),
-        extra: commandOptions(key).extra,
-      ),
-    );
+      );
+    } on ProblemFailure catch (f) {
+      // 막힘: 409 INVALID_STATE + details[{field: blockers, reason: 코드}].
+      if (f.problem.status == 409) {
+        throw WithdrawalBlockedFailure([
+          for (final d in f.problem.details)
+            if (d.field == 'blockers' && d.reason != null)
+              blockerFromWire(d.reason!),
+        ]);
+      }
+      rethrow;
+    }
     final body =
         res.data ?? (throw const ContractViolationFailure('탈퇴 응답 본문 없음'));
     return body.requestId;
@@ -74,8 +97,8 @@ final class ApiWithdrawalRepository implements WithdrawalRepository {
         _ => WithdrawalState.unknown,
       },
       blockers: [
-        for (final b in res.data?.blockers ?? const <String>[])
-          blockerFromWire(b),
+        for (final b in res.data?.blockers ?? const <rd.WithdrawalBlocker>[])
+          blockerFromWire(b.value),
       ],
     );
   }
@@ -98,9 +121,7 @@ final class MockWithdrawalRepository implements WithdrawalRepository {
       throw const UnknownResultFailure(httpStatus: 501);
     }
     if (busy()) {
-      throw const ProblemFailure(
-        Problem(status: 409, code: ProblemCode.invalidState),
-      );
+      throw const WithdrawalBlockedFailure([WithdrawalBlocker.activeDelivery]);
     }
     _done.add(key.value);
     return key.value;

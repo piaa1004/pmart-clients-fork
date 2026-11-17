@@ -38,6 +38,17 @@ abstract interface class DeliveryRepository {
   /// 이 배송에서 내가 보낸 도움요청(오래된 것부터, execution 0.7.0 `GET …/help-requests`).
   /// 앱을 다시 켜도 보낸 요청·대화가 남게 한다.
   Future<List<HelpRecord>> helpRequests(String deliveryId);
+
+  /// 전달 재개 요청(`POST …/failures/resume-requests`, execution 0.14.0) — 전달 불가 등록 중에만.
+  /// 되돌리는 것은 지원센터 반려이고, 결과는 배송 상태로 확인한다. 실패는 [PmartFailure].
+  Future<void> requestFailureResume(
+    String deliveryId, {
+    String? note,
+    required IdempotencyKey key,
+  });
+
+  /// 회수지 연락처·주소(`GET /deliveries/{id}/recovery-contact`) + 좌표(배차 `recovery.pickup`).
+  Future<RecoveryContactView> recoveryContact(String deliveryId);
 }
 
 /// 지원센터 상담 대화(도움요청 한 건 = 대화 한 줄기). delivery-execution 0.6.0
@@ -205,6 +216,43 @@ abstract interface class EvidenceUploader {
   });
 }
 
+/// 내가 올린 사진 다시 보기(백엔드 회신 2026-11-17 §3 — 새 API 없이):
+/// 도움요청 상세 `evidenceRefs` → `GET /deliveries/{id}/evidence-photos/{photoRef}`(원본, 메모리에만).
+abstract interface class EvidencePhotoViewer {
+  /// 도움요청(전달 불가 신고가 연 대화 포함)에 함께 올린 사진 참조.
+  Future<List<String>> requestPhotoRefs(String deliveryId, String requestId);
+
+  /// 사진 원본. 디스크에 남기지 않는다(서버 `no-store`).
+  Future<Uint8List> photo(String deliveryId, String photoRef);
+}
+
+final class ApiEvidencePhotoViewer implements EvidencePhotoViewer {
+  ApiEvidencePhotoViewer(Dio dio)
+    : _exec = ex.PmartApiDeliveryExecution(dio: dio).getExecutionApi();
+
+  final ex.ExecutionApi _exec;
+
+  @override
+  Future<List<String>> requestPhotoRefs(
+    String deliveryId,
+    String requestId,
+  ) async {
+    final res = await pmartGuard(
+      () => _exec.getHelpRequest(deliveryId: deliveryId, requestId: requestId),
+    );
+    return res.data?.evidenceRefs ?? const [];
+  }
+
+  @override
+  Future<Uint8List> photo(String deliveryId, String photoRef) async {
+    final res = await pmartGuard(
+      () => _exec.getEvidencePhoto(deliveryId: deliveryId, photoRef: photoRef),
+    );
+    return res.data ??
+        (throw const ContractViolationFailure('evidence-photo 본문 없음'));
+  }
+}
+
 final class ApiEvidenceUploader implements EvidenceUploader {
   ApiEvidenceUploader(Dio dio)
     : _exec = ex.PmartApiDeliveryExecution(dio: dio).getExecutionApi();
@@ -246,10 +294,43 @@ String? packageIdFromQr(String code) {
 final class ApiDeliveryRepository implements DeliveryRepository {
   ApiDeliveryRepository(Dio dio)
     : _exec = ex.PmartApiDeliveryExecution(dio: dio).getExecutionApi(),
-      _me = ex.PmartApiDeliveryExecution(dio: dio).getMeApi();
+      _me = ex.PmartApiDeliveryExecution(dio: dio).getMeApi(),
+      _returns = ex.PmartApiDeliveryExecution(dio: dio).getReturnsApi(),
+      _dispatch = dp.PmartApiDeliveryDispatch(dio: dio).getDeliveriesApi();
 
   final ex.ExecutionApi _exec;
   final ex.MeApi _me;
+  final ex.ReturnsApi _returns;
+  final dp.DeliveriesApi _dispatch;
+
+  @override
+  Future<RecoveryContactView> recoveryContact(String deliveryId) async {
+    final res = await pmartGuard(
+      () => _returns.getRecoveryContact(deliveryId: deliveryId),
+    );
+    final c =
+        res.data ??
+        (throw const ContractViolationFailure('RecoveryContact 본문 없음'));
+    // 좌표는 참고값 — 못 읽어도 연락처·주소는 보인다.
+    dp.RecoveryInfoPickup? pin;
+    try {
+      pin = (await pmartGuard(
+        () => _dispatch.getDeliveryDispatch(deliveryId: deliveryId),
+      )).data?.recovery?.pickup;
+    } on PmartFailure {
+      pin = null;
+    }
+    return RecoveryContactView(
+      receiverPhone: c.receiverPhone,
+      receiverName: c.receiverName,
+      roadAddress: c.roadAddress,
+      detailAddress: c.detailAddress,
+      entranceMethod: entranceMethodFrom(c.entranceMethod),
+      entranceNote: c.entranceNote,
+      lat: pin?.lat?.toDouble(),
+      lng: pin?.lng?.toDouble(),
+    );
+  }
 
   @override
   Future<DeliveryView> get(String deliveryId) async {
@@ -312,6 +393,27 @@ final class ApiDeliveryRepository implements DeliveryRepository {
             completionRequest: completionRequestFromPayload(p),
             extra: extra,
           ),
+          DeliveryCommandKind.returnPickup => _returns.reportReturnPickup(
+            deliveryId: id,
+            idempotencyKey: key,
+            xSourceSystem: sourceSystem,
+            // items 는 비운다 — 서버가 회수 요청 줄을 쓴다(계약 0.10.0).
+            reportReturnPickupRequest: ex.ReportReturnPickupRequest(
+              occurredAt: occurredAt,
+              items: const [],
+              evidenceRefs: (p['evidenceRefs']! as List).cast<String>(),
+            ),
+            extra: extra,
+          ),
+          DeliveryCommandKind.returnToStore =>
+            _returns.reportReturnStoreDelivery(
+              deliveryId: id,
+              idempotencyKey: key,
+              xSourceSystem: sourceSystem,
+              reportReturnStoreDeliveryRequest:
+                  ex.ReportReturnStoreDeliveryRequest(occurredAt: occurredAt),
+              extra: extra,
+            ),
           DeliveryCommandKind.failure => _exec.reportFailure(
             deliveryId: id,
             idempotencyKey: key,
@@ -348,13 +450,7 @@ final class ApiDeliveryRepository implements DeliveryRepository {
         detailAddress: d.detailAddress,
         receiverName: d.receiverName,
         receiverPhone: d.receiverPhone,
-        entranceMethod: switch (d.entranceMethod?.value) {
-          'FREE' => EntranceMethod.free,
-          'PASSWORD' => EntranceMethod.password,
-          'CALL' => EntranceMethod.call,
-          'OTHER' => EntranceMethod.other,
-          _ => null,
-        },
+        entranceMethod: entranceMethodFrom(d.entranceMethod?.value),
         entranceNote: d.entranceNote,
         deliveryNote: d.deliveryNote,
         lat: d.lat?.toDouble(),
@@ -430,6 +526,23 @@ final class ApiDeliveryRepository implements DeliveryRepository {
             caseId: h.caseId,
           ),
     ];
+  }
+
+  @override
+  Future<void> requestFailureResume(
+    String deliveryId, {
+    String? note,
+    required IdempotencyKey key,
+  }) async {
+    await pmartGuard(
+      () => _exec.requestFailureResume(
+        deliveryId: deliveryId,
+        idempotencyKey: key.value,
+        xSourceSystem: sourceSystem,
+        requestFailureResumeRequest: ex.RequestFailureResumeRequest(note: note),
+        extra: commandOptions(key).extra,
+      ),
+    );
   }
 }
 
@@ -538,6 +651,14 @@ final class ApiHandoverRepository implements HandoverRepository {
   }
 }
 
+EntranceMethod? entranceMethodFrom(String? w) => switch (w) {
+  'FREE' => EntranceMethod.free,
+  'PASSWORD' => EntranceMethod.password,
+  'CALL' => EntranceMethod.call,
+  'OTHER' => EntranceMethod.other,
+  _ => null,
+};
+
 bool isActive(ExecutionState s) => switch (s) {
   ExecutionState.unassigned ||
   ExecutionState.completed ||
@@ -588,7 +709,44 @@ DeliveryView deliveryFromContract(ex.DeliveryExecution d) => DeliveryView(
   mfcId: d.mfcId,
   packageIds: d.packageIds ?? const [],
   handoverIds: d.handoverIds ?? const [],
+  failureHelpRequestId: d.failure?.helpRequestId,
+  resumeRequestedAt: d.failure?.resumeRequestedAt,
+  recovery: recoveryPurposeFrom(type: d.type?.value, purpose: d.purpose?.value),
+  returnLines: returnItemsFrom(d),
+  recoveryOrigin: switch (d.recoveryOrigin) {
+    final o? => (
+      placement: o.placement,
+      detail: o.placementDetail,
+      photoCount: o.photoRefs?.length ?? 0,
+    ),
+    null => null,
+  },
+  mfcPhone: d.mfcPhone,
 );
+
+/// 받을 품목. 반품 회수는 `returnLines`(서버가 이름을 채운다 — execution 0.14.3, 짝짓지 않는다),
+/// 반품 줄이 없는 회수(오배송·전달 실패 반납)는 원래 주문 품목 전부(백엔드 회신 2026-11-17).
+/// 이름이 없으면 null — 화면은 "상품 n".
+List<ReturnItem> returnItemsFrom(ex.DeliveryExecution d) {
+  String? nameOf(String? name, String? option) {
+    final s = [?name, ?option].join(' ').trim();
+    return s.isEmpty ? null : s;
+  }
+
+  final lines = d.returnLines ?? const <ex.ReturnLine>[];
+  if (lines.isNotEmpty) {
+    return [
+      for (final l in lines) (name: nameOf(l.name, l.optionLabel), qty: l.qty),
+    ];
+  }
+  if (d.type?.value != 'RETURN') return const [];
+  return [
+    for (final i
+        in d.orderSummary?.items ??
+            const <ex.DeliveryExecutionOrderSummaryItemsInner>[])
+      (name: nameOf(i.name, i.optionLabel), qty: i.qty ?? 0),
+  ];
+}
 
 ex.HelpCategory helpCategoryToContract(HelpCategory c) => switch (c) {
   HelpCategory.customerUnreachable => ex.HelpCategory.CUSTOMER_UNREACHABLE,
@@ -600,6 +758,7 @@ ex.HelpCategory helpCategoryToContract(HelpCategory c) => switch (c) {
   HelpCategory.storeWaiting => ex.HelpCategory.STORE_WAITING,
   HelpCategory.statusCorrection => ex.HelpCategory.STATUS_CORRECTION,
   HelpCategory.other => ex.HelpCategory.OTHER,
+  HelpCategory.deliveryFailure => ex.HelpCategory.DELIVERY_FAILURE,
 };
 
 /// 큐에 저장된 전달 실패 → 계약 본문. 사진(evidenceRefs)·연락 기록(contactAttempts)을 함께 보낸다.
@@ -619,7 +778,10 @@ ex.ReportFailureRequest failureRequestFromPayload(
     for (final a in (p['contactAttempts'] as List?) ?? const [])
       ex.ReportFailureRequestAllOfContactAttemptsInner(
         attemptedAt: DateTime.parse((a as Map)['attemptedAt']! as String),
-        // 방법은 선택 항목이다. 계약 값(안심번호·앱 메시지)에 일반 전화가 없어 비운다.
+        // 앱이 고객 번호로 건 일반 전화(execution 0.11.0 PHONE_CALL — 안심번호 없음).
+        method: ex
+            .ReportFailureRequestAllOfContactAttemptsInnerMethodEnum
+            .PHONE_CALL,
         result: a['answered'] == true
             ? ex
                   .ReportFailureRequestAllOfContactAttemptsInnerResultEnum

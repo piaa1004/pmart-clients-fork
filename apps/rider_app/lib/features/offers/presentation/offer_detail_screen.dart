@@ -166,54 +166,89 @@ class _OfferDetailScreenState extends ConsumerState<OfferDetailScreen> {
                           route: offerMapRoute(offer, trip, dutyMfc),
                         ),
                       ),
-                      _EtaStrip(offer: offer, trip: trip),
-                      const SectionGap(),
-                      // 레퍼런스 image 12: 픽업지 주소 밑에 가게전화연결, 전달지 주소 밑에 고객전화연결.
-                      PlaceSection(
-                        key: const ValueKey('pickup-place'),
-                        label: l10n.pickupPlace,
-                        title: trip == null
-                            ? storeText(l10n, offer.mfcId ?? dutyMfc)
-                            : l10n.storeLabel(trip.store.name),
-                        lines: [?trip?.store.address],
-                        linkKey: const ValueKey('call-store'),
-                        linkText: l10n.callStore,
-                        onLink: () => _call(
-                          trip?.store.phone,
-                          l10n.storePhoneUnavailable,
-                        ),
-                        routeKey: const ValueKey('route-pickup'),
-                        onRoute: switch (trip?.store) {
-                          final s? => () => _navigate(
-                            l10n.storeLabel(s.name),
-                            s.point,
+                      if (offer.recovery case final rec?) ...[
+                        // 회수 제안: 회수지(대략) → MFC 반납. 주소·연락처는 수락 뒤.
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(16, 14, 16, 4),
+                          child: Text(
+                            recoveryPurposeText(l10n, rec),
+                            key: const ValueKey('offer-detail-recovery'),
+                            style: const TextStyle(
+                              fontSize: 17,
+                              fontWeight: FontWeight.w800,
+                              color: RiderColors.danger,
+                            ),
                           ),
-                          null => null,
-                        },
-                      ),
-                      const Divider(indent: 16, endIndent: 16, height: 1),
-                      PlaceSection(
-                        key: const ValueKey('drop-place'),
-                        label: l10n.dropPlace,
-                        title: offer.dropAreaLabel ?? l10n.dropAreaUnknown,
-                        lines: [l10n.dropDetailAfterAccept],
-                        // 고객 연락처는 픽업한 뒤에 연다(사용자 결정 2026-11-16).
-                        linkKey: const ValueKey('call-customer-locked'),
-                        linkText: l10n.callCustomer,
-                        linkLocked: true,
-                        lockedNote: l10n.customerPhoneAfterPickup,
-                        routeKey: const ValueKey('route-drop'),
-                        onRoute: switch (trip?.drop) {
-                          final p? => () => _navigate(l10n.naviDropName, p),
-                          null => null,
-                        },
-                      ),
-                      const SectionGap(),
-                      OrderInfoSection(
-                        trip: trip,
-                        orderId: null,
-                        mfcId: offer.mfcId ?? dutyMfc,
-                      ),
+                        ),
+                        PlaceSection(
+                          key: const ValueKey('recovery-place'),
+                          label: l10n.recoveryPlaceLabel,
+                          title: offer.dropAreaLabel ?? l10n.dropAreaUnknown,
+                          lines: [l10n.recoveryDetailAfterAccept],
+                        ),
+                        const Divider(indent: 16, endIndent: 16, height: 1),
+                        PlaceSection(
+                          key: const ValueKey('return-place'),
+                          label: l10n.returnPlaceLabel,
+                          title: storeText(l10n, offer.mfcId ?? dutyMfc),
+                          lines: [
+                            if (offer.distanceKm case final d?)
+                              l10n.recoveryDistance(d.toStringAsFixed(1)),
+                          ],
+                        ),
+                      ] else ...[
+                        _EtaStrip(offer: offer, trip: trip),
+                        const SectionGap(),
+                        // 레퍼런스 image 12: 픽업지 주소 밑에 가게전화연결, 전달지 주소 밑에 고객전화연결.
+                        PlaceSection(
+                          key: const ValueKey('pickup-place'),
+                          label: l10n.pickupPlace,
+                          title: trip == null
+                              ? storeText(l10n, offer.mfcId ?? dutyMfc)
+                              : l10n.storeLabel(trip.store.name),
+                          lines: [?trip?.store.address],
+                          linkKey: const ValueKey('call-store'),
+                          // 지점 전화가 없으면 버튼을 숨긴다.
+                          linkText: trip?.store.phone == null
+                              ? null
+                              : l10n.callStore,
+                          onLink: () => _call(
+                            trip?.store.phone,
+                            l10n.storePhoneUnavailable,
+                          ),
+                          routeKey: const ValueKey('route-pickup'),
+                          onRoute: switch (trip?.store) {
+                            final s? => () => _navigate(
+                              l10n.storeLabel(s.name),
+                              s.point,
+                            ),
+                            null => null,
+                          },
+                        ),
+                        const Divider(indent: 16, endIndent: 16, height: 1),
+                        PlaceSection(
+                          key: const ValueKey('drop-place'),
+                          label: l10n.dropPlace,
+                          title: offer.dropAreaLabel ?? l10n.dropAreaUnknown,
+                          lines: [l10n.dropDetailAfterAccept],
+                          // 고객 연락처는 픽업한 뒤에 연다(사용자 결정 2026-11-16).
+                          linkKey: const ValueKey('call-customer-locked'),
+                          linkText: l10n.callCustomer,
+                          linkLocked: true,
+                          lockedNote: l10n.customerPhoneAfterPickup,
+                          routeKey: const ValueKey('route-drop'),
+                          onRoute: switch (trip?.drop) {
+                            final p? => () => _navigate(l10n.naviDropName, p),
+                            null => null,
+                          },
+                        ),
+                        const SectionGap(),
+                        OrderInfoSection(
+                          trip: trip,
+                          orderId: null,
+                          mfcId: offer.mfcId ?? dutyMfc,
+                        ),
+                      ],
                       const SectionGap(),
                       _DeliveryInfo(
                         offer: offer,

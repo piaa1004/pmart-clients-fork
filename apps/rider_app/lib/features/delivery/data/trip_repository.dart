@@ -41,6 +41,7 @@ void rememberOfferTrip(String deliveryId, dp.OfferSummary s, {DateTime? now}) {
       name: order?.mfcName,
       address: order?.mfcAddress,
       point: s.pickupPoint,
+      phone: order?.mfcPhone,
     ),
     items: [
       for (final i in order?.items ?? const <dp.OfferOrderInfoItemsInner>[])
@@ -63,12 +64,14 @@ void rememberOfferTrip(String deliveryId, dp.OfferSummary s, {DateTime? now}) {
   );
 }
 
-/// 서버 값으로 만든 픽업지. 가게 전화는 서버에 아직 없다(null). 좌표가 없으면 앱 지점표 좌표.
+/// 서버 값으로 만든 픽업지. 가게 전화는 서버 값만(dispatch 0.5.2 `order.mfcPhone`·execution `mfcPhone` —
+/// 등록 안 됐으면 null 이라 버튼을 숨긴다, 앱 목 번호는 쓰지 않는다). 좌표가 없으면 앱 지점표 좌표.
 MfcBranch _serverStore(
   String? mfcId, {
   String? name,
   String? address,
   dp.LatLng? point,
+  String? phone,
 }) {
   final known = mfcById(mfcId);
   return MfcBranch(
@@ -76,6 +79,7 @@ MfcBranch _serverStore(
     name: name ?? known?.name ?? '',
     region: known?.region ?? MfcRegion.gyeongsang,
     address: address ?? known?.address ?? '',
+    phone: phone,
     lat: point?.lat ?? known?.lat ?? 0,
     lng: point?.lng ?? known?.lng ?? 0,
   );
@@ -116,7 +120,20 @@ final class ApiTripRepository implements TripRepository {
       orderNo:
           summary.orderNumber ??
           (hint?.orderNo.isNotEmpty == true ? hint!.orderNo : d?.orderId ?? ''),
-      store: hint?.store ?? _serverStore(d?.mfcId),
+      store: switch (hint?.store) {
+        // 배송 조회의 지점 전화가 더 새 값이다.
+        final s? when d?.mfcPhone != null => MfcBranch(
+          id: s.id,
+          name: s.name,
+          region: s.region,
+          address: s.address,
+          phone: d!.mfcPhone,
+          lat: s.lat,
+          lng: s.lng,
+        ),
+        final s? => s,
+        null => _serverStore(d?.mfcId, name: d?.mfcName, phone: d?.mfcPhone),
+      },
       items: items.isEmpty ? hint?.items ?? const [] : items,
       menuTotal: summary.itemAmount ?? hint?.menuTotal,
       deliveryRequest: summary.deliveryNote ?? hint?.deliveryRequest,

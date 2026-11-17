@@ -20,6 +20,7 @@ import '../domain/delivery.dart';
 import 'delivery_controller.dart';
 import 'delivery_texts.dart';
 import 'phone_caller.dart';
+import 'photo_box.dart';
 import 'support_screen.dart';
 import 'support_thread_screen.dart' show helpStateLook;
 import 'trip_widgets.dart';
@@ -116,8 +117,40 @@ class _DeliveryScreenState extends ConsumerState<DeliveryScreen> {
   /// 고객과 다시 연락돼 전달할 수 있다 → 지원센터 대화에 알리고 그 대화로 간다.
   /// 전달 불가는 라이더가 직접 취소할 수 없다 — 운영자가 반려하면 원래 단계로 돌아온다(계약
   /// failure-decisions REJECT). 반려되면 이 화면이 확인해 전달 단계로 바꾼다.
+  /// 전달 재개 요청 키(같은 누름의 재시도는 같은 키).
+  IdempotencyKey? _resumeKey;
+
   Future<void> _askResume(DeliveryView d) async {
     final l10n = AppLocalizations.of(context);
+    // 서버가 실패 등록과 함께 대화를 열었으면(execution 0.14.0) 재개 요청 API 로 알린다 —
+    // 대화에 "[전달 재개 요청]"이 남고 운영자 대기 목록에 뜬다. 되돌리는 것은 지원센터 반려.
+    final threadId = d.failureHelpRequestId;
+    if (threadId != null) {
+      setState(() => _resuming = true);
+      var sent = false;
+      try {
+        await ref
+            .read(deliveryRepositoryProvider)
+            .requestFailureResume(
+              _id,
+              note: l10n.failureResumeMessage,
+              key: _resumeKey ??= IdempotencyKey.generate(),
+            );
+        sent = true;
+        _resumeKey = null;
+      } on ProblemFailure catch (f) {
+        // 409 = 이미 전달 불가 상태가 아니다(반려됨 등) — 화면이 상태를 다시 읽는다.
+        if (f.problem.status == 409) _resumeKey = null;
+      } on PmartFailure {
+        // 결과 불명 — 같은 키로 다시 누르면 된다.
+      }
+      if (!mounted) return;
+      setState(() => _resuming = false);
+      ref.invalidate(deliveryProvider(_id));
+      if (!sent) showRiderToast(context, l10n.failureResumeNotSent);
+      unawaited(context.push('/deliveries/$_id/support/$threadId'));
+      return;
+    }
     final last = ref.read(helpFlowProvider(_id)).last;
     if (last == null) {
       // 대화가 아직 없으면 같은 내용으로 도움요청을 먼저 연다.
@@ -200,6 +233,11 @@ class _DeliveryScreenState extends ConsumerState<DeliveryScreen> {
         if (!_cancelling) await _cancelAssignment();
       case SupportAction.reportFailure:
         unawaited(context.push('/deliveries/$_id/failure'));
+      // 지원센터 갈림길에서 고른 문제에 맞춰 사유를 미리 고른다.
+      case SupportAction.reportFailureUnreachable:
+        unawaited(context.push('/deliveries/$_id/failure?reason=unreachable'));
+      case SupportAction.reportFailureAddress:
+        unawaited(context.push('/deliveries/$_id/failure?reason=addressError'));
       case null:
         break;
     }
@@ -323,6 +361,148 @@ class _DeliveryScreenState extends ConsumerState<DeliveryScreen> {
     );
   }
 
+  /// 회수지 제목: 주소(반품 회수) · 주소 없음(오배송 — 원래 놓은 곳) · 못 읽음 · 읽는 중.
+  String _recoveryPlaceTitle(
+    AppLocalizations l10n,
+    AsyncValue<RecoveryContactView>? a,
+  ) => switch (a) {
+    AsyncData(:final value) => value.addressLine ?? l10n.recoveryNoAddress,
+    AsyncError() => l10n.recoveryContactUnavailable,
+    _ => l10n.statLoading,
+  };
+
+  /// 회수 배송 펼친 시트: 회수지(받는 곳) · 받을 품목 · 사진(받기 전) · 반납할 곳(MFC).
+  List<Widget> _recoveryDetails(
+    AppLocalizations l10n,
+    DeliveryView d,
+    AsyncValue<RecoveryContactView>? contactAsync, {
+    required bool collect,
+    required String storeName,
+    required MfcBranch? store,
+    required VoidCallback onRouteRecovery,
+  }) {
+    final contact = contactAsync?.value;
+    final origin = d.recoveryOrigin;
+    final calls = ref.watch(deliveryFlowProvider(_id)).contacts.length;
+    return [
+      PlaceSection(
+        key: const ValueKey('recovery-place'),
+        label: l10n.recoveryPlaceLabel,
+        title: _recoveryPlaceTitle(l10n, contactAsync),
+        lines: [
+          if (contact?.receiverName case final n?) l10n.recoveryReceiver(n),
+          ?contact?.entranceNote,
+          if (origin != null)
+            l10n.recoveryOrigin(
+              [
+                placementText(l10n, origin.placement),
+                ?origin.detail,
+              ].join(' · '),
+            ),
+          if (calls > 0) l10n.recoveryCalls(calls),
+        ],
+        // 회수지 전화(고객 또는 받는 분). 걸면 연락 기록이 남는다(받기 전 실패 등록에 쓴다).
+        linkKey: const ValueKey('call-recovery'),
+        linkText: l10n.recoveryCall,
+        onLink: contact == null
+            ? null
+            : () => callCustomerAndRecord(
+                context,
+                ref,
+                _id,
+                contact.receiverPhone,
+              ),
+        routeKey: const ValueKey('route-recovery'),
+        onRoute: collect ? onRouteRecovery : null,
+      ),
+      const Divider(indent: 16, endIndent: 16, height: 1),
+      TripSection(
+        icon: Icons.inventory_2_outlined,
+        title: l10n.recoveryItems,
+        children: [
+          if (d.returnLines.isEmpty)
+            Text(
+              l10n.recoveryItemsUnknown,
+              style: const TextStyle(fontSize: 15, color: RiderColors.sub),
+            )
+          else
+            for (final (i, line) in d.returnLines.indexed)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 2),
+                child: Text(
+                  l10n.recoveryItemLine(
+                    line.name ?? l10n.recoveryItemUnnamed(i + 1),
+                    line.qty,
+                  ),
+                  key: ValueKey('recovery-item-$i'),
+                  style: const TextStyle(fontSize: 15),
+                ),
+              ),
+        ],
+      ),
+      // 받기 전: 받은 상품 사진을 올려야 "회수했어요"를 누를 수 있다(QR 없음 — 사진이 증빙).
+      if (d.state == ExecutionState.assigned)
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                l10n.recoveryPhotoTitle,
+                style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              const SizedBox(height: 8),
+              EvidencePhotoBox(deliveryId: _id),
+            ],
+          ),
+        ),
+      const SectionGap(),
+      PlaceSection(
+        key: const ValueKey('return-place'),
+        label: l10n.returnPlaceLabel,
+        title: storeName,
+        lines: [?store?.address],
+        linkKey: const ValueKey('call-store'),
+        // 지점 전화가 등록 안 됐으면 버튼을 숨긴다(백엔드 회신 2026-11-17).
+        linkText: (d.mfcPhone ?? store?.phone) == null ? null : l10n.callStore,
+        onLink: () =>
+            _call(d.mfcPhone ?? store?.phone, l10n.storePhoneUnavailable),
+        routeKey: const ValueKey('route-store'),
+        onRoute: store == null
+            ? null
+            : () => _navigate(name: storeName, to: store.point),
+      ),
+    ];
+  }
+
+  /// MFC 반납: 직원에게 넘겼는지 한 번 더 묻고 보낸다(배송 끝 — 수행료).
+  Future<void> _returnToStore() async {
+    final l10n = AppLocalizations.of(context);
+    final sure = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(l10n.returnStoreButton),
+        content: Text(l10n.returnStoreAsk),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: Text(l10n.wdCancel),
+          ),
+          TextButton(
+            key: const ValueKey('return-store-confirm'),
+            onPressed: () => Navigator.of(context).pop(true),
+            child: Text(l10n.returnStoreConfirm),
+          ),
+        ],
+      ),
+    );
+    if (sure != true || !mounted) return;
+    await ref.read(deliveryFlowProvider(_id).notifier).returnToStore();
+  }
+
   @override
   Widget build(BuildContext context) {
     final provider = deliveryProvider(_id);
@@ -331,7 +511,9 @@ class _DeliveryScreenState extends ConsumerState<DeliveryScreen> {
       _watchFailure(next == ExecutionState.failureReported);
       if (prev == ExecutionState.failureReported &&
           (next == ExecutionState.pickedUp ||
-              next == ExecutionState.arrivedAtCustomer)) {
+              next == ExecutionState.arrivedAtCustomer ||
+              // 반품 회수는 받기 전으로 돌아간다.
+              next == ExecutionState.assigned)) {
         showRiderToast(context, AppLocalizations.of(context).failureRejected);
       }
     });
@@ -404,10 +586,25 @@ class _DeliveryScreenState extends ConsumerState<DeliveryScreen> {
     final queue = ref.watch(deliveryQueueProvider(_id)).value ?? const [];
     final help = ref.watch(helpFlowProvider(_id));
     final trip = ref.watch(tripInfoProvider(_id)).value;
+    // 회수 배송(반품·오배송 회수 한 벌): 회수지에서 받음(사진) → MFC 반납. 일반 단계는 쓰지 않는다.
+    final rec = d.recovery;
+    final isRec = rec != null;
+    final recCollect =
+        isRec &&
+        (d.state == ExecutionState.assigned ||
+            d.state == ExecutionState.failureReported);
+    final recReturning = isRec && d.state == ExecutionState.returnPickedUp;
+    final contactAsync = isRec ? ref.watch(recoveryContactProvider(_id)) : null;
+    final contact = contactAsync?.value;
+    final GeoPoint? recoveryPoint = switch (contact) {
+      RecoveryContactView(:final lat?, :final lng?) => (lat: lat, lng: lng),
+      _ => null,
+    };
     final dropStage =
-        d.state == ExecutionState.pickedUp ||
-        d.state == ExecutionState.arrivedAtCustomer ||
-        d.state == ExecutionState.failureReported;
+        !isRec &&
+        (d.state == ExecutionState.pickedUp ||
+            d.state == ExecutionState.arrivedAtCustomer ||
+            d.state == ExecutionState.failureReported);
     // 전달지는 픽업 뒤에만 열린다(그 전에는 부르지 않는다).
     final dropAsync = dropStage ? ref.watch(dropInfoProvider(_id)) : null;
     final drop = dropAsync?.value;
@@ -416,7 +613,7 @@ class _DeliveryScreenState extends ConsumerState<DeliveryScreen> {
       Future.microtask(() => ctl.hydrate(d));
     }
     final busy = queue.any((q) => q.isOpen);
-    final pickupStage = isPickupStage(d.state);
+    final pickupStage = !isRec && isPickupStage(d.state);
     final store = trip?.store ?? mfcById(d.mfcId);
     final storeName = store == null
         ? storeText(l10n, d.mfcId)
@@ -428,6 +625,15 @@ class _DeliveryScreenState extends ConsumerState<DeliveryScreen> {
     // 핀 위 예정시간: 픽업 전에는 픽업·전달 예정, 픽업 뒤에는 전달 예정만(레퍼런스 image 11).
     final route = store == null
         ? null
+        : isRec
+        // 회수: 회수지(받기 전) → MFC(받은 뒤). 회수지 좌표가 없으면 MFC 만.
+        ? (recoveryPoint == null
+              ? MapRoute(pickup: store.point)
+              : MapRoute(
+                  pickup: recoveryPoint,
+                  drop: store.point,
+                  toDrop: recReturning,
+                ))
         : MapRoute(
             pickup: store.point,
             drop: dropPoint,
@@ -529,7 +735,10 @@ class _DeliveryScreenState extends ConsumerState<DeliveryScreen> {
                   children: [
                     Expanded(
                       child: Text(
-                        due ?? executionText(l10n, d.state),
+                        due ??
+                            (isRec
+                                ? recoveryStageText(l10n, d.state)
+                                : executionText(l10n, d.state)),
                         key: ValueKey(
                           due == null ? 'execution-state' : 'due-time',
                         ),
@@ -540,6 +749,26 @@ class _DeliveryScreenState extends ConsumerState<DeliveryScreen> {
                         ),
                       ),
                     ),
+                    if (rec != null)
+                      Container(
+                        key: const ValueKey('recovery-purpose'),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 5,
+                        ),
+                        decoration: BoxDecoration(
+                          color: RiderColors.danger.withValues(alpha: 0.10),
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                        child: Text(
+                          recoveryPurposeText(l10n, rec),
+                          style: const TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                            color: RiderColors.danger,
+                          ),
+                        ),
+                      ),
                     if (due != null)
                       Container(
                         padding: const EdgeInsets.symmetric(
@@ -563,7 +792,14 @@ class _DeliveryScreenState extends ConsumerState<DeliveryScreen> {
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  pickupStage ? storeName : address,
+                  isRec
+                      ? (recReturning ||
+                                d.state == ExecutionState.returnedToStore
+                            ? storeName
+                            : _recoveryPlaceTitle(l10n, contactAsync))
+                      : pickupStage
+                      ? storeName
+                      : address,
                   key: const ValueKey('place-title'),
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
@@ -593,7 +829,11 @@ class _DeliveryScreenState extends ConsumerState<DeliveryScreen> {
         ),
         _SplitActions(
           onHelp: help.sending || gone ? null : () => _openHelp(d),
-          onNavigate: () => pickupStage
+          onNavigate: () => isRec
+              ? (recReturning
+                    ? _navigate(name: storeName, to: store?.point)
+                    : _navigate(name: l10n.recoveryNaviName, to: recoveryPoint))
+              : pickupStage
               ? _navigate(name: storeName, to: store?.point)
               : _navigate(name: l10n.naviDropName, to: dropPoint),
         ),
@@ -687,6 +927,17 @@ class _DeliveryScreenState extends ConsumerState<DeliveryScreen> {
             ],
           ),
         ),
+      if (isRec)
+        ..._recoveryDetails(
+          l10n,
+          d,
+          contactAsync,
+          collect: recCollect,
+          storeName: storeName,
+          store: store,
+          onRouteRecovery: () =>
+              _navigate(name: l10n.recoveryNaviName, to: recoveryPoint),
+        ),
       if (pickupStage) ...[
         // 레퍼런스 image 12: 픽업지 주소 밑에 가게전화연결, 전달지 주소 밑에 고객전화연결.
         PlaceSection(
@@ -695,8 +946,12 @@ class _DeliveryScreenState extends ConsumerState<DeliveryScreen> {
           title: storeName,
           lines: [?store?.address],
           linkKey: const ValueKey('call-store'),
-          linkText: l10n.callStore,
-          onLink: () => _call(store?.phone, l10n.storePhoneUnavailable),
+          // 지점 전화가 등록 안 됐으면 버튼을 숨긴다(백엔드 회신 2026-11-17).
+          linkText: (d.mfcPhone ?? store?.phone) == null
+              ? null
+              : l10n.callStore,
+          onLink: () =>
+              _call(d.mfcPhone ?? store?.phone, l10n.storePhoneUnavailable),
           routeKey: const ValueKey('route-pickup'),
           onRoute: store == null
               ? null
@@ -731,13 +986,15 @@ class _DeliveryScreenState extends ConsumerState<DeliveryScreen> {
           ],
         ),
       ],
-      const SectionGap(),
-      OrderInfoSection(
-        trip: trip,
-        orderId: d.orderId,
-        mfcId: d.mfcId,
-        packageCount: d.packageIds.length,
-      ),
+      if (!isRec) ...[
+        const SectionGap(),
+        OrderInfoSection(
+          trip: trip,
+          orderId: d.orderId,
+          mfcId: d.mfcId,
+          packageCount: d.packageIds.length,
+        ),
+      ],
       if (dropStage)
         RequestNotes(
           storeRequest: trip?.storeRequest,
@@ -756,6 +1013,17 @@ class _DeliveryScreenState extends ConsumerState<DeliveryScreen> {
 
     // 진행 버튼(가게 도착·픽업·전달 완료). 레퍼런스처럼 시트를 펼쳤을 때 아래에 뜬다.
     final Widget? action = switch (d.state) {
+      // 회수: 사진을 올린 뒤 "회수했어요" → MFC 에서 "반납했어요".
+      ExecutionState.assigned when isRec => RiderButton(
+        key: const ValueKey('return-pickup'),
+        label: l10n.returnPickupButton,
+        onPressed: flow.photoRef != null && !busy ? ctl.returnPickup : null,
+      ),
+      ExecutionState.returnPickedUp => RiderButton(
+        key: const ValueKey('return-store'),
+        label: l10n.returnStoreButton,
+        onPressed: busy ? null : _returnToStore,
+      ),
       ExecutionState.assigned => RiderButton(
         key: const ValueKey('arrive-store'),
         label: l10n.arriveStore,
@@ -780,32 +1048,79 @@ class _DeliveryScreenState extends ConsumerState<DeliveryScreen> {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Text(
-            l10n.failureWaiting,
+          // 접수됐다는 것을 분명히(배송이 FAILURE_REPORTED = 서버가 신고를 받았다, 사용자 지적 2026-11-17).
+          Row(
             key: const ValueKey('failure-waiting'),
-            textAlign: TextAlign.center,
-            style: const TextStyle(fontSize: 14, color: RiderColors.sub),
+            children: [
+              const Icon(
+                Icons.check_circle,
+                color: RiderColors.danger,
+                size: 22,
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      l10n.failureReceived,
+                      style: const TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    Text(
+                      l10n.failureWaiting,
+                      style: const TextStyle(
+                        fontSize: 13,
+                        color: RiderColors.sub,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          // 이 칸이 아래 도움요청·길찾기 줄을 덮으므로 여기에 같은 길을 둔다.
+          Row(
+            children: [
+              Expanded(
+                child: RiderOutlineButton(
+                  key: const ValueKey('failure-talk'),
+                  height: 48,
+                  icon: Icons.support_agent,
+                  label: l10n.failureTalk,
+                  onPressed: () {
+                    final thread =
+                        d.failureHelpRequestId ?? help.last?.key.value;
+                    if (thread == null) {
+                      _openHelp(d);
+                    } else {
+                      context.push('/deliveries/$_id/support/$thread');
+                    }
+                  },
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: RiderOutlineButton(
+                  key: const ValueKey('failure-help'),
+                  height: 48,
+                  icon: Icons.notifications_active_outlined,
+                  label: l10n.helpRequest,
+                  onPressed: () => _openHelp(d),
+                ),
+              ),
+            ],
           ),
           const SizedBox(height: 8),
           // 고객에게 연락이 와서 전달할 수 있게 됐을 때.
-          RiderOutlineButton(
+          RiderButton(
             key: const ValueKey('failure-resume'),
-            accent: true,
-            height: 52,
             icon: Icons.phone_callback_outlined,
             label: l10n.failureResume,
             onPressed: _resuming ? null : () => _askResume(d),
-          ),
-          const SizedBox(height: 8),
-          RiderButton(
-            key: const ValueKey('failure-talk'),
-            icon: Icons.support_agent,
-            label: l10n.failureTalk,
-            onPressed: () => help.last == null
-                ? _openHelp(d)
-                : context.push(
-                    '/deliveries/$_id/support/${help.last!.key.value}',
-                  ),
           ),
         ],
       ),
@@ -898,8 +1213,14 @@ class _DeliveryScreenState extends ConsumerState<DeliveryScreen> {
               ),
             ),
           ),
-        if (d.state == ExecutionState.completed)
-          Positioned.fill(child: _DoneOverlay(onClose: _finish)),
+        if (d.state == ExecutionState.completed ||
+            d.state == ExecutionState.returnedToStore)
+          Positioned.fill(
+            child: _DoneOverlay(
+              onClose: _finish,
+              label: isRec ? l10n.returnDoneBanner : null,
+            ),
+          ),
       ],
     );
     if (widget.embedded) return stack;
@@ -1060,9 +1381,12 @@ class _DropCard extends StatelessWidget {
 
 /// 배달완료 알림(서버가 전달 완료를 확정한 뒤). 캐릭터 그림 없이 브랜드 색 판만 쓴다.
 class _DoneOverlay extends StatelessWidget {
-  const _DoneOverlay({required this.onClose});
+  const _DoneOverlay({required this.onClose, this.label});
 
   final VoidCallback onClose;
+
+  /// 회수 배송은 "반납 완료".
+  final String? label;
 
   @override
   Widget build(BuildContext context) {
@@ -1083,7 +1407,7 @@ class _DoneOverlay extends StatelessWidget {
                 color: RiderColors.primary,
                 alignment: Alignment.center,
                 child: Text(
-                  l10n.doneBanner,
+                  label ?? l10n.doneBanner,
                   style: const TextStyle(
                     color: Colors.white,
                     fontSize: 52,

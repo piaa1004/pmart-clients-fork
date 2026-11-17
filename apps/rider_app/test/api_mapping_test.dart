@@ -14,6 +14,8 @@ import 'package:rider_app/features/auth/data/pickup_points.dart';
 import 'package:rider_app/features/auth/data/rider_auth.dart';
 import 'package:rider_app/features/auth/data/signup.dart';
 import 'package:rider_app/features/inquiries/data/inquiries.dart';
+import 'package:rider_app/features/my/data/records.dart';
+import 'package:rider_app/features/my/data/withdrawal.dart';
 import 'package:rider_app/features/notifications/data/notifications.dart';
 import 'package:rider_app/shared/mfc_directory.dart';
 import 'package:rider_app/features/delivery/data/delivery_repository.dart';
@@ -234,13 +236,43 @@ void main() {
     expect(vehicleToContract(Vehicle.kickboard).value, 'KICKBOARD');
     final a = _FakeAdapter({
       'POST /api/v1/riders/license-checks': (200, {'available': false}),
+      'POST /api/v1/riders/phone-checks': (200, {'available': true}),
+      'POST /api/v1/riders/account-checks': (200, {'available': false}),
+      'GET /api/v1/riders/bank-codes': (
+        200,
+        {
+          'items': [
+            {'code': '004', 'name': 'KB국민은행'},
+            {'code': '090', 'name': '카카오뱅크'},
+          ],
+        },
+      ),
     });
     final repo = ApiSignupRepository(_dio(a));
     expect(await repo.isLicenseAvailable('11-22-333333-44'), isFalse);
-    // 휴대폰·계좌는 미리 확인할 API 가 없다 — "통과"로 단정하지 않는다.
+    // 휴대폰·계좌 중복 확인(rider 0.7.0). 은행은 금융결제원 코드로 보낸다.
+    expect(await repo.isPhoneAvailable('01012345678'), isTrue);
+    expect(await repo.isAccountAvailable('004', '1234567890'), isFalse);
+    expect((await repo.banks()).map((b) => b.code), ['004', '090']);
+  });
+
+  test('가입 확인: 서버에 경로가 아직 없으면(404) 통과가 아니라 "가입 때 확인"(null)', () async {
+    const notFound = (
+      404,
+      {'type': 'about:blank', 'status': 404, 'code': 'NOT_FOUND'},
+    );
+    final a = _FakeAdapter({
+      'POST /api/v1/riders/phone-checks': notFound,
+      'POST /api/v1/riders/account-checks': notFound,
+      'GET /api/v1/riders/bank-codes': notFound,
+    });
+    final repo = ApiSignupRepository(_dio(a));
     expect(await repo.isPhoneAvailable('01012345678'), isNull);
-    expect(await repo.isAccountAvailable('국민은행', '1234567890'), isNull);
-    expect(a.calls, ['POST /api/v1/riders/license-checks']);
+    expect(await repo.isAccountAvailable('004', '1234567890'), isNull);
+    expect(await repo.banks(), SignupOptions.banks);
+    // 연결 실패는 "확인 못 함"으로 던진다(쓸 수 있다고 단정하지 않는다).
+    final down = ApiSignupRepository(_dio(_FakeAdapter({})));
+    expect(down.isPhoneAvailable('01012345678'), throwsA(isA<PmartFailure>()));
   });
 
   test('실서버 로그인: Google ID 토큰 → 라이더 토큰 저장 → /riders/me 404 면 미가입', () async {
@@ -434,6 +466,94 @@ void main() {
     expect(notificationTarget('INQUIRY', 'inq-1'), isA<InquiryTarget>());
     expect(notificationTarget('NONE', null), isA<NoTarget>());
     expect(notificationTarget('HELP_REQUEST', 'broken'), isA<NoTarget>());
+  });
+
+  test('사진 다시 보기: 도움요청 상세 evidenceRefs → 사진 원본(새 API 없이)', () async {
+    final a = _FakeAdapter({
+      'GET /api/v1/deliveries/dlv-1/help-requests/req-1': (
+        200,
+        {
+          'requestId': 'req-1',
+          'deliveryId': 'dlv-1',
+          'evidenceRefs': ['ph-1'],
+        },
+      ),
+      'GET /api/v1/deliveries/dlv-1/evidence-photos/ph-1': (200, 'JPEG'),
+    });
+    final viewer = ApiEvidencePhotoViewer(_dio(a));
+    expect(await viewer.requestPhotoRefs('dlv-1', 'req-1'), ['ph-1']);
+    expect(await viewer.photo('dlv-1', 'ph-1'), isNotEmpty);
+  });
+  test('탈퇴 막힘: 409 INVALID_STATE details[blockers] → 사유 목록', () async {
+    final a = _FakeAdapter({
+      'POST /api/v1/riders/me/withdrawals': (
+        409,
+        {
+          'type': 'about:blank',
+          'status': 409,
+          'code': 'INVALID_STATE',
+          'details': [
+            {'field': 'blockers', 'reason': 'UNCONFIRMED_EARNING'},
+            {'field': 'blockers', 'reason': 'OPEN_HELP_REQUEST'},
+          ],
+        },
+      ),
+    });
+    final repo = ApiWithdrawalRepository(_dio(a));
+    await expectLater(
+      repo.request(key: IdempotencyKey.generate()),
+      throwsA(
+        isA<WithdrawalBlockedFailure>().having((f) => f.blockers, 'blockers', [
+          WithdrawalBlocker.unconfirmedEarning,
+          WithdrawalBlocker.openHelpRequest,
+        ]),
+      ),
+    );
+  });
+
+  test('운행시간: 오늘 + 이번 주(월~일) 두 번 묻고 초를 시간으로', () async {
+    final a = _FakeAdapter({});
+    final dio = _dio(a);
+    final calls = <String>[];
+    dio.interceptors.add(
+      InterceptorsWrapper(
+        onRequest: (o, h) {
+          calls.add(o.uri.query);
+          final week = o.uri.queryParameters.containsKey('from');
+          h.resolve(
+            Response(
+              requestOptions: o,
+              statusCode: 200,
+              data: week
+                  ? {
+                      'from': '2026-11-16',
+                      'to': '2026-11-22',
+                      'totalSeconds': 9000,
+                      'days': [
+                        {'date': '2026-11-16', 'seconds': 3600},
+                        {'date': '2026-11-17', 'seconds': 5400},
+                        {'date': '2026-11-18', 'seconds': 0},
+                      ],
+                    }
+                  : {
+                      'from': '2026-11-18',
+                      'to': '2026-11-18',
+                      'totalSeconds': 0,
+                      'days': [
+                        {'date': '2026-11-18', 'seconds': 0},
+                      ],
+                    },
+            ),
+          );
+        },
+      ),
+    );
+    final t = await ApiRecordsRepository(dio).operatingTime();
+    expect(calls.last, 'from=2026-11-16&to=2026-11-22');
+    expect(t.today, DateTime(2026, 11, 18));
+    expect(t.todayTotal, Duration.zero);
+    expect(t.weekTotal, const Duration(hours: 2, minutes: 30));
+    expect(t.days.map((d) => d.day.day), [16, 17]);
   });
 }
 

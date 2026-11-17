@@ -51,6 +51,16 @@ class InquiryListScreen extends ConsumerWidget {
               ),
             ),
             const SizedBox(height: 12),
+            // 실시간 채팅 상담(사용자 요청 2026-11-17). 문의 남기기는 답을 기다리는 방식.
+            RiderOutlineButton(
+              key: const ValueKey('live-chat'),
+              accent: true,
+              height: 52,
+              icon: Icons.chat_bubble_outline,
+              label: l10n.liveChatTitle,
+              onPressed: () => context.push('/my/inquiries/chat'),
+            ),
+            const SizedBox(height: 8),
             RiderButton(
               key: const ValueKey('inquiry-new'),
               icon: Icons.edit_outlined,

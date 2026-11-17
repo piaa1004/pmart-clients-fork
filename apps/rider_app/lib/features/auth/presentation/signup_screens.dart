@@ -181,7 +181,7 @@ class _SignupFlowScreenState extends ConsumerState<SignupFlowScreen> {
   bool _accountDeferred = false;
   bool _checkingAccount = false;
 
-  String get _accountKey => '${_draft.bankName}|${_draft.accountNumber}';
+  String get _accountKey => '${_draft.bankCode}|${_draft.accountNumber}';
 
   /// 지금 은행·번호로 확인한 결과(바뀌었으면 null).
   bool? get _accountResult =>
@@ -193,7 +193,7 @@ class _SignupFlowScreenState extends ConsumerState<SignupFlowScreen> {
 
   Future<void> _checkAccount() async {
     final l10n = AppLocalizations.of(context);
-    final bank = _draft.bankName;
+    final bank = _draft.bankCode;
     final number = _draft.accountNumber.trim();
     if (bank == null) {
       showRiderToast(context, l10n.accountNeedBank);
@@ -205,9 +205,18 @@ class _SignupFlowScreenState extends ConsumerState<SignupFlowScreen> {
     }
     setState(() => _checkingAccount = true);
     final key = _accountKey;
-    final ok = await ref
-        .read(signupRepositoryProvider)
-        .isAccountAvailable(bank, number);
+    final bool? ok;
+    try {
+      ok = await ref
+          .read(signupRepositoryProvider)
+          .isAccountAvailable(bank, number);
+    } on PmartFailure {
+      // 확인하지 못했다 — 쓸 수 있다고 단정하지 않는다.
+      if (!mounted) return;
+      setState(() => _checkingAccount = false);
+      showRiderToast(context, l10n.checkFailed);
+      return;
+    }
     if (!mounted) return;
     setState(() {
       _checkingAccount = false;
@@ -225,7 +234,15 @@ class _SignupFlowScreenState extends ConsumerState<SignupFlowScreen> {
       return;
     }
     setState(() => _checkingPhone = true);
-    final ok = await ref.read(signupRepositoryProvider).isPhoneAvailable(phone);
+    final bool? ok;
+    try {
+      ok = await ref.read(signupRepositoryProvider).isPhoneAvailable(phone);
+    } on PmartFailure {
+      if (!mounted) return;
+      setState(() => _checkingPhone = false);
+      showRiderToast(context, AppLocalizations.of(context).checkFailed);
+      return;
+    }
     if (!mounted) return;
     setState(() {
       _checkingPhone = false;
@@ -431,25 +448,44 @@ class _SignupFlowScreenState extends ConsumerState<SignupFlowScreen> {
     if (picked != null) _set(_draft.copyWith(vehicle: picked));
   }
 
+  /// 은행 고르기: 이름을 보이고 금융결제원 코드를 보낸다(실서버는 `GET /riders/bank-codes`).
   Future<void> _pickBank() async {
-    final picked = await showModalBottomSheet<String>(
+    final List<BankOption> banks;
+    try {
+      banks = await ref.read(signupRepositoryProvider).banks();
+    } on PmartFailure {
+      if (mounted) {
+        showRiderToast(context, AppLocalizations.of(context).bankLoadFailed);
+      }
+      return;
+    }
+    if (!mounted) return;
+    final picked = await showModalBottomSheet<BankOption>(
       context: context,
       backgroundColor: Colors.white,
+      isScrollControlled: true,
       builder: (context) => SafeArea(
-        child: ListView(
-          shrinkWrap: true,
-          children: [
-            for (final b in SignupOptions.banks)
-              ListTile(
-                key: ValueKey('bank-$b'),
-                title: Text(b),
-                onTap: () => Navigator.of(context).pop(b),
-              ),
-          ],
+        child: ConstrainedBox(
+          constraints: BoxConstraints(
+            maxHeight: MediaQuery.of(context).size.height * 0.7,
+          ),
+          child: ListView(
+            shrinkWrap: true,
+            children: [
+              for (final b in banks)
+                ListTile(
+                  key: ValueKey('bank-${b.name}'),
+                  title: Text(b.name),
+                  onTap: () => Navigator.of(context).pop(b),
+                ),
+            ],
+          ),
         ),
       ),
     );
-    if (picked != null) _set(_draft.copyWith(bankName: picked));
+    if (picked != null) {
+      _set(_draft.copyWith(bankName: picked.name, bankCode: picked.code));
+    }
   }
 
   @override
