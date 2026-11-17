@@ -86,7 +86,7 @@ final class MockProfileRepository implements ProfileRepository {
     await Future<void>.delayed(latency);
     return RiderProfileView(
       riderId: 'rider-mock-1',
-      name: '라이더',
+      name: '홍길동',
       restriction: restriction,
       restrictedUntil: until,
     );
@@ -104,3 +104,13 @@ final profileRepositoryProvider = Provider<ProfileRepository>(
 final profileProvider = FutureProvider<RiderProfileView>(
   (ref) => ref.watch(profileRepositoryProvider).me(),
 );
+
+/// 인사말: 가입 때 쓴 이름이 있으면 "홍길동 라이더님", 없으면(조회 전·실패) "라이더님".
+String riderGreetingText(
+  String? name,
+  String Function(String) named,
+  String plain,
+) {
+  final n = name?.trim() ?? '';
+  return n.isEmpty ? plain : named(n);
+}

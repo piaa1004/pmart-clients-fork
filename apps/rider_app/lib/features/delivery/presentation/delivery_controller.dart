@@ -43,7 +43,7 @@ final assignmentCancelRepositoryProvider = Provider<AssignmentCancelRepository>(
 final supportThreadRepositoryProvider = Provider<SupportThreadRepository>(
   (ref) => switch (ref.watch(envProvider)) {
     PmartEnv.mock => ref.watch(_mockDelivery),
-    PmartEnv.local => const ApiSupportThreadRepository(),
+    PmartEnv.local => ApiSupportThreadRepository(ref.watch(dioProvider)),
   },
 );
 
@@ -466,6 +466,17 @@ class DeliveryFlowController extends Notifier<DeliveryFlowState> {
       });
 }
 
+/// 전달 불가 사유 → 지원센터 대화를 열 때의 도움요청 유형.
+HelpCategory helpCategoryForFailure(FailureReason r) => switch (r) {
+  FailureReason.customerAbsent ||
+  FailureReason.unreachable ||
+  FailureReason.refused => HelpCategory.customerUnreachable,
+  FailureReason.addressError => HelpCategory.addressIssue,
+  FailureReason.damaged => HelpCategory.goodsIssue,
+  FailureReason.riderIncident => HelpCategory.accident,
+  FailureReason.other => HelpCategory.other,
+};
+
 /// 연락 기록이 2회 이상 필요한 고객 사유(백엔드 안내 2026-11-13 §3).
 bool needsContactAttempts(FailureReason r) => switch (r) {
   FailureReason.customerAbsent ||
@@ -544,7 +555,11 @@ class HelpFlowController extends Notifier<HelpFlowState> {
   @override
   HelpFlowState build() => const HelpFlowState();
 
-  Future<void> send(HelpCategory category, {String? detail}) async {
+  Future<void> send(
+    HelpCategory category, {
+    String? detail,
+    List<String>? evidenceRefs,
+  }) async {
     if (state.sending) return;
     final text = detail?.trim();
     final note = text == null || text.isEmpty ? null : text;
@@ -574,6 +589,7 @@ class HelpFlowController extends Notifier<HelpFlowState> {
           deliveryId,
           category,
           detail: note,
+          evidenceRefs: evidenceRefs,
           key: ticket.key,
         );
         sent = true;
@@ -592,6 +608,31 @@ class HelpFlowController extends Notifier<HelpFlowState> {
   /// 아직 처리되지 않은 도움요청의 상태를 다시 조회한다.
   Future<void> refresh() async {
     final repo = ref.read(deliveryRepositoryProvider);
+    // 앱을 다시 켰으면 보낸 도움요청을 서버 목록에서 되찾는다(execution 0.7.0).
+    if (state.tickets.isEmpty && !state.sending) {
+      try {
+        final records = await repo.helpRequests(deliveryId);
+        if (!ref.mounted) return;
+        if (state.tickets.isEmpty && records.isNotEmpty) {
+          state = HelpFlowState(
+            tickets: [
+              for (final r in records)
+                HelpTicket(
+                  key: IdempotencyKey(r.requestId),
+                  category: r.category,
+                  detail: r.detail,
+                  sentAt: r.sentAt,
+                  state: r.state,
+                  caseId: r.caseId,
+                ),
+            ],
+          );
+        }
+      } on PmartFailure {
+        // 목록을 못 읽으면 빈 목록으로 단정하지 않는다 — 다음에 다시.
+      }
+      return;
+    }
     for (final t in state.tickets) {
       if (t.state == HelpState.resolved) continue;
       final s = await repo.helpStatus(deliveryId, t.key);

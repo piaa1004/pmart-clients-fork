@@ -6,11 +6,13 @@ import 'package:pmart_ui/pmart_ui.dart';
 import '../../../l10n/gen/app_localizations.dart';
 import '../../../shared/rider_style.dart';
 import '../../../shared/rider_widgets.dart';
+import '../../auth/data/pickup_points.dart';
 import '../../auth/data/session.dart';
 import '../../delivery/presentation/delivery_texts.dart';
 import '../../home/presentation/home_screen.dart';
 import '../../offers/domain/offer_list.dart';
 import '../../offers/presentation/offer_controllers.dart';
+import '../data/profile.dart';
 import '../data/records.dart';
 
 /// 마이페이지. 레퍼런스의 친구초대·미션달성·오늘의 기록·명세서 발급은 PMart 업무 문서에 없는 기능이라 두지 않는다.
@@ -19,6 +21,8 @@ class MyPageScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    // 서버 지점 이름(코드 대신 "PMart 부산진구지점")을 한 번 읽는다.
+    ref.watch(storeNamesProvider);
     final l10n = AppLocalizations.of(context);
     final duty = ref.watch(dutyProvider).value;
     final today = ref.watch(todaySummaryProvider);
@@ -44,7 +48,11 @@ class MyPageScreen extends ConsumerWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        l10n.riderGreeting,
+                        riderGreetingText(
+                          ref.watch(profileProvider).value?.name,
+                          l10n.riderGreetingNamed,
+                          l10n.riderGreeting,
+                        ),
                         style: const TextStyle(
                           fontSize: 22,
                           fontWeight: FontWeight.w800,
@@ -163,6 +171,19 @@ class MyPageScreen extends ConsumerWidget {
                   icon: Icons.schedule,
                   label: l10n.menuTime,
                   onTap: () => context.push('/my/time'),
+                ),
+                // 배송과 상관없는 문의(정산·계정·앱 오류) — 배송 건은 배송 화면의 도움요청.
+                MenuRow(
+                  key: const ValueKey('menu-inquiries'),
+                  icon: Icons.support_agent,
+                  label: l10n.menuInquiries,
+                  onTap: () => context.push('/my/inquiries'),
+                ),
+                MenuRow(
+                  key: const ValueKey('menu-notifications'),
+                  icon: Icons.notifications_none,
+                  label: l10n.menuNotifications,
+                  onTap: () => context.push('/notifications'),
                 ),
               ],
             ),
@@ -336,8 +357,8 @@ class SettingsScreen extends ConsumerWidget {
                 Container(width: 1, height: 12, color: RiderColors.hint),
                 TextButton(
                   key: const ValueKey('withdraw'),
-                  // 탈퇴(`POST /riders/me/withdrawals`)는 진행 배송·미정산 확인이 필요해 아직 붙이지 않았다.
-                  onPressed: () => showRiderToast(context, l10n.withdrawSoon),
+                  // 탈퇴(`POST /riders/me/withdrawals`) — 진행 배송·미정산은 서버가 거절한다.
+                  onPressed: () => context.push('/my/withdraw'),
                   child: Text(
                     l10n.withdraw,
                     style: const TextStyle(

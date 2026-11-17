@@ -3,6 +3,8 @@ import 'package:pmart_api_delivery_dispatch/pmart_api_delivery_dispatch.dart';
 import 'package:pmart_api_rider/pmart_api_rider.dart' as rd;
 import 'package:pmart_core/pmart_core.dart';
 
+import '../../delivery/data/trip_repository.dart' show rememberOfferTrip;
+
 import '../../../shared/providers.dart' show sourceSystem;
 import '../domain/offer_list.dart';
 
@@ -62,6 +64,12 @@ final class ApiOfferRepository implements OfferRepository {
     final body = res.data;
     if (body == null) {
       throw const ContractViolationFailure('listMyOffers 본문 없음');
+    }
+    // 카드·상세·수락 뒤 배송 화면이 쓸 주문 요약·좌표·소요를 기억한다.
+    for (final o in body.items ?? const <Offer>[]) {
+      if ((o.deliveryId, o.summary) case (final id?, final s?)) {
+        rememberOfferTrip(id, s);
+      }
     }
     return offerListFromContract(body);
   }

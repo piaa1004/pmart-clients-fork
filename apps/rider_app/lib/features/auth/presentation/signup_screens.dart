@@ -1,13 +1,18 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:pmart_core/pmart_core.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../l10n/gen/app_localizations.dart';
 import '../../../shared/mfc_directory.dart';
+import '../../../shared/phone_format.dart';
 import '../../../shared/rider_style.dart';
 import '../../../shared/rider_widgets.dart';
+import '../../../shared/terms_text.dart';
+import '../data/pickup_points.dart';
 import '../data/session.dart';
+import 'login_screen.dart' show loginResultText;
 import '../data/signup.dart';
 import 'postcode_screen.dart';
 
@@ -120,8 +125,9 @@ class SignupIntroScreen extends ConsumerWidget {
                   final result = await ref
                       .read(sessionProvider.notifier)
                       .loginWithGoogle(newAccount: true);
-                  if (result == LoginResult.notConnected && context.mounted) {
-                    showRiderToast(context, l10n.loginNotConnected);
+                  if (loginResultText(l10n, result) case final text?
+                      when context.mounted) {
+                    showRiderToast(context, text);
                   }
                 },
               ),
@@ -159,8 +165,89 @@ class _SignupFlowScreenState extends ConsumerState<SignupFlowScreen> {
   bool? _licenseAvailable;
   bool _checkingLicense = false;
 
+  /// 면허 칸 아래 안내(형식 틀림·확인 실패). 번호를 고치면 지운다.
+  String? _licenseNote;
+
+  /// 휴대폰 번호 "인증하기"(중복 확인) 결과. 번호가 바뀌면 다시 받는다.
+  bool? _phoneAvailable;
+
+  /// 미리 확인할 API 가 없다(실서버) — 가입 때 서버가 확인한다.
+  bool _phoneDeferred = false;
+  bool _checkingPhone = false;
+
+  /// 계좌 "인증하기"(중복 확인) 결과와 그때의 은행·번호. 은행이나 번호가 바뀌면 다시 받는다.
+  bool? _accountAvailable;
+  String? _accountCheckedFor;
+  bool _accountDeferred = false;
+  bool _checkingAccount = false;
+
+  String get _accountKey => '${_draft.bankName}|${_draft.accountNumber}';
+
+  /// 지금 은행·번호로 확인한 결과(바뀌었으면 null).
+  bool? get _accountResult =>
+      _accountCheckedFor == _accountKey ? _accountAvailable : null;
+
+  bool get _accountOk => _accountResult == true;
+
+  static final _accountPattern = RegExp(r'^[0-9]{10,14}$');
+
+  Future<void> _checkAccount() async {
+    final l10n = AppLocalizations.of(context);
+    final bank = _draft.bankName;
+    final number = _draft.accountNumber.trim();
+    if (bank == null) {
+      showRiderToast(context, l10n.accountNeedBank);
+      return;
+    }
+    if (!_accountPattern.hasMatch(number)) {
+      showRiderToast(context, l10n.accountFormat);
+      return;
+    }
+    setState(() => _checkingAccount = true);
+    final key = _accountKey;
+    final ok = await ref
+        .read(signupRepositoryProvider)
+        .isAccountAvailable(bank, number);
+    if (!mounted) return;
+    setState(() {
+      _checkingAccount = false;
+      // null = 확인 API 가 없다 — 통과로 단정하지 않고 "가입할 때 확인"으로 안내.
+      _accountAvailable = ok ?? true;
+      _accountDeferred = ok == null;
+      _accountCheckedFor = key;
+    });
+  }
+
+  Future<void> _checkPhone() async {
+    final phone = _draft.phone.trim();
+    if (!_phonePattern.hasMatch(phone)) {
+      showRiderToast(context, AppLocalizations.of(context).phoneFormat);
+      return;
+    }
+    setState(() => _checkingPhone = true);
+    final ok = await ref.read(signupRepositoryProvider).isPhoneAvailable(phone);
+    if (!mounted) return;
+    setState(() {
+      _checkingPhone = false;
+      _phoneAvailable = ok ?? true;
+      _phoneDeferred = ok == null;
+    });
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    // 한글 조합이 끝났는지(자음만 남았는지)는 글자가 안 바뀌어도 바뀐다 — 다시 그린다.
+    _name.addListener(_redraw);
+  }
+
+  void _redraw() {
+    if (mounted) setState(() {});
+  }
+
   @override
   void dispose() {
+    _name.removeListener(_redraw);
     for (final c in [_phone, _name, _holder, _account, _detail, _license]) {
       c.dispose();
     }
@@ -186,13 +273,24 @@ class _SignupFlowScreenState extends ConsumerState<SignupFlowScreen> {
   Future<void> _checkLicense() async {
     final number = _draft.licenseNumber.trim();
     if (!licensePattern.hasMatch(number)) {
-      showRiderToast(context, AppLocalizations.of(context).licenseFormat);
+      // 칸 아래에 남겨 둔다(잠깐 뜨는 안내만으로는 왜 안 넘어가는지 모른다 — 사용자 지적 2026-11-17).
+      setState(() => _licenseNote = AppLocalizations.of(context).licenseFormat);
       return;
     }
+    setState(() => _licenseNote = null);
     setState(() => _checkingLicense = true);
-    final ok = await ref
-        .read(signupRepositoryProvider)
-        .isLicenseAvailable(number);
+    final bool ok;
+    try {
+      ok = await ref.read(signupRepositoryProvider).isLicenseAvailable(number);
+    } on PmartFailure {
+      // 확인하지 못했다 — 쓸 수 있다고 단정하지 않는다.
+      if (!mounted) return;
+      setState(() {
+        _checkingLicense = false;
+        _licenseNote = AppLocalizations.of(context).checkFailed;
+      });
+      return;
+    }
     if (!mounted) return;
     setState(() {
       _checkingLicense = false;
@@ -222,21 +320,33 @@ class _SignupFlowScreenState extends ConsumerState<SignupFlowScreen> {
 
   bool get _canNext => switch (_step) {
     1 => _requiredConsents,
-    2 => _phonePattern.hasMatch(_draft.phone),
+    // 휴대폰 번호는 "인증하기"(중복 확인)를 통과해야 한다. 이름도 필요.
+    2 =>
+      _phonePattern.hasMatch(_draft.phone) &&
+          _phoneAvailable == true &&
+          // 완성된 글자로 된 이름(자음·모음만은 안 됨).
+          nameValid(_draft.name),
     // 계좌는 선택(가입 뒤 프로필에서도 넣는다). 넣기 시작했으면 세 칸을 다 채우고,
     // 예금주는 가입자 본인 이름과 같아야 한다.
     3 =>
       !_bankStarted ||
           (_draft.bankName != null &&
               _draft.accountNumber.isNotEmpty &&
-              holderMatchesName(_draft.holderName, _draft.name)),
+              holderMatchesName(_draft.holderName, _draft.name) &&
+              // 계좌는 "인증하기"(중복 확인)를 통과해야 한다.
+              _accountOk),
     // 거주지는 주소 검색으로 고른 실제 주소만. 면허는 넣었으면 중복 확인까지.
     _ =>
       _draft.roadAddress.isNotEmpty &&
           _draft.area != null &&
           _draft.vehicle != null &&
-          _licenseOk,
+          _licenseOk &&
+          // 배달료를 확인하고 동의해야 완료(레퍼런스 image 41).
+          _feeAgreed,
   };
+
+  /// 배달료 안내를 열어 "확인했어요"를 눌렀는지.
+  bool _feeAgreed = false;
 
   Future<void> _next() async {
     final l10n = AppLocalizations.of(context);
@@ -264,6 +374,17 @@ class _SignupFlowScreenState extends ConsumerState<SignupFlowScreen> {
   }
 
   Future<void> _pickArea() async {
+    // 실서버는 서버 지점 목록(centerId), 목은 앱 지점표. 못 읽으면 빈 목록으로 보이지 않고 안내한다.
+    final Map<MfcRegion, List<AreaOption>> areas;
+    try {
+      areas = await ref.read(areaOptionsProvider.future);
+    } on PmartFailure {
+      if (mounted) {
+        showRiderToast(context, AppLocalizations.of(context).areaLoadFailed);
+      }
+      return;
+    }
+    if (!mounted) return;
     final picked = await showModalBottomSheet<AreaOption>(
       context: context,
       isScrollControlled: true,
@@ -271,7 +392,7 @@ class _SignupFlowScreenState extends ConsumerState<SignupFlowScreen> {
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
       ),
-      builder: (_) => _AreaSheet(initial: _draft.area),
+      builder: (_) => _AreaSheet(initial: _draft.area, areas: areas),
     );
     if (picked != null) _set(_draft.copyWith(area: picked));
   }
@@ -406,6 +527,7 @@ class _SignupFlowScreenState extends ConsumerState<SignupFlowScreen> {
               const SizedBox(width: 12),
               Expanded(child: Text(consentTitle(l10n, c), style: _label)),
               IconButton(
+                key: ValueKey('terms-${c.type}'),
                 visualDensity: VisualDensity.compact,
                 icon: const Icon(Icons.chevron_right, color: RiderColors.hint),
                 onPressed: () => context.push('/signup/terms/${c.type}'),
@@ -426,13 +548,57 @@ class _SignupFlowScreenState extends ConsumerState<SignupFlowScreen> {
     const SizedBox(height: 24),
     Text(l10n.fieldPhone, style: _label),
     const SizedBox(height: 8),
-    TextField(
-      key: const ValueKey('signup-phone'),
-      controller: _phone,
-      keyboardType: TextInputType.phone,
-      inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-      decoration: InputDecoration(hintText: l10n.fieldPhoneHint),
-      onChanged: (v) => _set(_draft.copyWith(phone: v)),
+    Row(
+      children: [
+        Expanded(
+          child: TextField(
+            key: const ValueKey('signup-phone'),
+            controller: _phone,
+            keyboardType: TextInputType.phone,
+            // 010-0000-0000 처럼 하이픈 자동, 11자리 넘게는 입력 불가. 저장·전송은 숫자만.
+            inputFormatters: const [PhoneNumberFormatter()],
+            decoration: InputDecoration(hintText: l10n.fieldPhoneHint),
+            onChanged: (v) {
+              final digits = phoneDigits(v);
+              if (digits == _draft.phone) return;
+              // 번호가 바뀌면 인증(중복 확인)을 다시 받는다.
+              _phoneAvailable = null;
+              _set(_draft.copyWith(phone: digits));
+            },
+          ),
+        ),
+        const SizedBox(width: 8),
+        SizedBox(
+          height: 48,
+          child: OutlinedButton(
+            key: const ValueKey('phone-check'),
+            onPressed: _checkingPhone || _draft.phone.trim().isEmpty
+                ? null
+                : _checkPhone,
+            child: Text(l10n.phoneVerify),
+          ),
+        ),
+      ],
+    ),
+    Padding(
+      padding: const EdgeInsets.only(top: 6),
+      child: Text(
+        switch (_phoneAvailable) {
+          true when _phoneDeferred => l10n.checkAtSignup,
+          true => l10n.phoneAvailable,
+          false => l10n.phoneDuplicate,
+          null => l10n.phoneVerifyNote,
+        },
+        key: const ValueKey('phone-result'),
+        style: TextStyle(
+          fontSize: 13,
+          color: switch (_phoneAvailable) {
+            true => RiderColors.primary,
+            false => RiderColors.danger,
+            null => RiderColors.hint,
+          },
+        ),
+      ),
     ),
     const SizedBox(height: 20),
     Text(l10n.fieldName, style: _label),
@@ -440,7 +606,16 @@ class _SignupFlowScreenState extends ConsumerState<SignupFlowScreen> {
     TextField(
       key: const ValueKey('signup-name'),
       controller: _name,
-      decoration: InputDecoration(hintText: l10n.fieldNameHint),
+      decoration: InputDecoration(
+        hintText: l10n.fieldNameHint,
+        // 한글을 조합하는 중(자음만 친 순간)에는 띄우지 않는다.
+        errorText:
+            _draft.name.trim().isEmpty ||
+                nameValid(_draft.name) ||
+                _name.value.isComposingRangeValid
+            ? null
+            : (hasLooseJamo(_draft.name) ? l10n.nameJamo : l10n.nameInvalid),
+      ),
       onChanged: (v) => _set(_draft.copyWith(name: v)),
     ),
     const SizedBox(height: 20),
@@ -473,13 +648,55 @@ class _SignupFlowScreenState extends ConsumerState<SignupFlowScreen> {
     const SizedBox(height: 20),
     Text(l10n.fieldAccount, style: _label),
     const SizedBox(height: 8),
-    TextField(
-      key: const ValueKey('signup-account'),
-      controller: _account,
-      keyboardType: TextInputType.number,
-      inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-      onChanged: (v) => _set(_draft.copyWith(accountNumber: v)),
+    Row(
+      children: [
+        Expanded(
+          child: TextField(
+            key: const ValueKey('signup-account'),
+            controller: _account,
+            keyboardType: TextInputType.number,
+            inputFormatters: [
+              FilteringTextInputFormatter.digitsOnly,
+              LengthLimitingTextInputFormatter(14),
+            ],
+            decoration: InputDecoration(hintText: l10n.fieldAccountHint),
+            onChanged: (v) => _set(_draft.copyWith(accountNumber: v)),
+          ),
+        ),
+        const SizedBox(width: 8),
+        SizedBox(
+          height: 48,
+          child: OutlinedButton(
+            key: const ValueKey('account-check'),
+            onPressed: _checkingAccount || _draft.accountNumber.trim().isEmpty
+                ? null
+                : _checkAccount,
+            child: Text(l10n.phoneVerify),
+          ),
+        ),
+      ],
     ),
+    if (_draft.accountNumber.isNotEmpty)
+      Padding(
+        padding: const EdgeInsets.only(top: 6),
+        child: Text(
+          switch (_accountResult) {
+            true when _accountDeferred => l10n.checkAtSignup,
+            true => l10n.accountAvailable,
+            false => l10n.accountDuplicate,
+            null => l10n.accountVerifyNote,
+          },
+          key: const ValueKey('account-result'),
+          style: TextStyle(
+            fontSize: 13,
+            color: switch (_accountResult) {
+              true => RiderColors.primary,
+              false => RiderColors.danger,
+              null => RiderColors.hint,
+            },
+          ),
+        ),
+      ),
     const SizedBox(height: 20),
     _InfoBox(title: l10n.bankNoticeTitle, body: l10n.bankNoticeBody),
   ];
@@ -558,13 +775,13 @@ class _SignupFlowScreenState extends ConsumerState<SignupFlowScreen> {
             key: const ValueKey('signup-license'),
             controller: _license,
             keyboardType: TextInputType.number,
-            inputFormatters: [
-              FilteringTextInputFormatter.allow(RegExp(r'[0-9-]')),
-            ],
+            // 00-00-000000-00 처럼 하이픈 자동, 12자리 넘게는 입력 불가.
+            inputFormatters: const [LicenseNumberFormatter()],
             decoration: InputDecoration(hintText: l10n.fieldLicenseHint),
             onChanged: (v) {
               // 번호가 바뀌면 중복 확인을 다시 받는다.
               _licenseAvailable = null;
+              _licenseNote = null;
               _set(_draft.copyWith(licenseNumber: v, licenseChecked: false));
             },
           ),
@@ -582,7 +799,16 @@ class _SignupFlowScreenState extends ConsumerState<SignupFlowScreen> {
         ),
       ],
     ),
-    if (_licenseAvailable case final ok?)
+    if (_licenseNote case final note?)
+      Padding(
+        padding: const EdgeInsets.only(top: 6),
+        child: Text(
+          note,
+          key: const ValueKey('license-note'),
+          style: const TextStyle(fontSize: 13, color: RiderColors.danger),
+        ),
+      )
+    else if (_licenseAvailable case final ok?)
       Padding(
         padding: const EdgeInsets.only(top: 6),
         child: Text(
@@ -604,12 +830,59 @@ class _SignupFlowScreenState extends ConsumerState<SignupFlowScreen> {
           style: const TextStyle(fontSize: 13, color: RiderColors.hint),
         ),
       ),
+    // 레퍼런스 image 41: 배달료 확인하기 › / 배달료를 확인하였으며 이에 동의합니다.
+    const SizedBox(height: 28),
+    InkWell(
+      key: const ValueKey('fee-guide'),
+      onTap: () async {
+        final ok = await context.push<bool>('/signup/fees');
+        if (ok == true) setState(() => _feeAgreed = true);
+      },
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 4),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              l10n.feeGuideLink,
+              style: const TextStyle(
+                fontSize: 17,
+                fontWeight: FontWeight.w800,
+                color: RiderColors.primary,
+              ),
+            ),
+            const Icon(Icons.chevron_right, color: RiderColors.primary),
+          ],
+        ),
+      ),
+    ),
+    const SizedBox(height: 4),
+    Row(
+      children: [
+        if (_feeAgreed) ...[
+          const Icon(Icons.check_circle, size: 18, color: RiderColors.primary),
+          const SizedBox(width: 4),
+        ],
+        Expanded(
+          child: Text(
+            l10n.feeAgreeNote,
+            key: const ValueKey('fee-agree-note'),
+            style: TextStyle(
+              fontSize: 14,
+              color: _feeAgreed ? RiderColors.ink : RiderColors.sub,
+            ),
+          ),
+        ),
+      ],
+    ),
   ];
 }
 
 String regionText(AppLocalizations l10n, MfcRegion r) => switch (r) {
-  MfcRegion.chungcheongGangwon => l10n.regionChungcheongGangwon,
-  MfcRegion.gyeongsangJeolla => l10n.regionGyeongsangJeolla,
+  MfcRegion.chungcheong => l10n.regionChungcheong,
+  MfcRegion.gangwon => l10n.regionGangwon,
+  MfcRegion.jeolla => l10n.regionJeolla,
+  MfcRegion.gyeongsang => l10n.regionGyeongsang,
 };
 
 class _Check extends StatelessWidget {
@@ -706,11 +979,12 @@ class _SelectBox extends StatelessWidget {
   );
 }
 
-/// 배달 지역 고르기: 권역(충청·강원 / 경상·전라) → MFC 지점(레퍼런스의 두 단계 시트).
+/// 배달 지역 고르기: 권역(충청·강원·전라·경상 — 2026-11-17) → 그 권역의 MFC 지점(레퍼런스의 두 단계 시트).
 class _AreaSheet extends StatefulWidget {
-  const _AreaSheet({this.initial});
+  const _AreaSheet({this.initial, required this.areas});
 
   final AreaOption? initial;
+  final Map<MfcRegion, List<AreaOption>> areas;
 
   @override
   State<_AreaSheet> createState() => _AreaSheetState();
@@ -724,9 +998,10 @@ class _AreaSheetState extends State<_AreaSheet> {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
-    final areas = SignupOptions.areas;
+    final areas = widget.areas;
     final selected = _second ? _branch : _region;
-    final crossAxisCount = _second ? 3 : 2;
+    // 지점 이름("부산해운대지점")이 잘리지 않게 세부 지역도 2칸.
+    const crossAxisCount = 2;
     return SafeArea(
       child: Column(
         mainAxisSize: MainAxisSize.min,
@@ -746,10 +1021,10 @@ class _AreaSheetState extends State<_AreaSheet> {
               shrinkWrap: true,
               mainAxisSpacing: 10,
               crossAxisSpacing: 8,
-              childAspectRatio: _second ? 2.2 : 3.2,
+              childAspectRatio: 3.2,
               children: [
                 if (_second)
-                  for (final a in areas[_region]!)
+                  for (final a in areas[_region] ?? const <AreaOption>[])
                     PillOption(
                       key: ValueKey('area-${a.name}'),
                       label: a.name,
@@ -757,16 +1032,18 @@ class _AreaSheetState extends State<_AreaSheet> {
                       onTap: () => setState(() => _branch = a),
                     )
                 else
+                  // 지점이 있는 권역만(실서버에 아직 등록 안 된 권역은 숨긴다).
                   for (final r in MfcRegion.values)
-                    PillOption(
-                      key: ValueKey('area-${r.name}'),
-                      label: regionText(l10n, r),
-                      selected: r == _region,
-                      onTap: () => setState(() {
-                        if (_region != r) _branch = null;
-                        _region = r;
-                      }),
-                    ),
+                    if (areas[r]?.isNotEmpty ?? false)
+                      PillOption(
+                        key: ValueKey('area-${r.name}'),
+                        label: regionText(l10n, r),
+                        selected: r == _region,
+                        onTap: () => setState(() {
+                          if (_region != r) _branch = null;
+                          _region = r;
+                        }),
+                      ),
               ],
             ),
           ),
@@ -823,7 +1100,7 @@ class _AreaSheetState extends State<_AreaSheet> {
   }
 }
 
-/// 약관 본문. 본문은 약관이 확정되면 넣는다(지금은 제목과 안내만).
+/// 약관 본문(`assets/terms/<type>.md` — `docs/PMart_라이더앱_약관_5종.md` 를 나눈 것, 2026-11-17 초안).
 class TermsScreen extends StatelessWidget {
   const TermsScreen({super.key, required this.type});
 
@@ -851,14 +1128,29 @@ class TermsScreen extends StatelessWidget {
                     fontWeight: FontWeight.w700,
                   ),
                 ),
-                const SizedBox(height: 16),
-                Text(
-                  l10n.termsPending,
-                  style: const TextStyle(
-                    fontSize: 14,
-                    height: 1.6,
-                    color: RiderColors.sub,
-                  ),
+                const SizedBox(height: 8),
+                FutureBuilder<String>(
+                  future: DefaultAssetBundle.of(context)
+                      .loadString('assets/terms/${item.type}.md'),
+                  builder: (context, snap) => switch (snap) {
+                    AsyncSnapshot(:final data?) => TermsText(
+                      key: const ValueKey('terms-body'),
+                      source: data,
+                    ),
+                    // 본문 파일이 없으면 "확정 뒤 표시" 안내.
+                    AsyncSnapshot(hasError: true) => Text(
+                      l10n.termsPending,
+                      style: const TextStyle(
+                        fontSize: 14,
+                        height: 1.6,
+                        color: RiderColors.sub,
+                      ),
+                    ),
+                    _ => const Padding(
+                      padding: EdgeInsets.all(24),
+                      child: Center(child: CircularProgressIndicator()),
+                    ),
+                  },
                 ),
               ],
             ),

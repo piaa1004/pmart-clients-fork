@@ -150,6 +150,9 @@ void main() {
     await t.tap(find.byKey(const ValueKey('accept-offer-bundle-1')));
     await _settle(t);
     expect(offers.assignedDeliveries, containsAll(['dlv-b1', 'dlv-b2']));
+    // 다른 제안이 없으면 홈에 배송 시트가 바로 뜬다(레퍼런스 image 14) — 시트가 부르는 조회를 마저 끝낸다.
+    expect(find.byKey(const ValueKey('delivery-dlv-b1')), findsOneWidget);
+    await t.pump(const Duration(seconds: 2));
   });
 
   test('배달리스트 수락은 같은 키면 같은 판정, 없는 배송은 늦은 수락', () async {

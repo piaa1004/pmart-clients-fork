@@ -12,12 +12,15 @@ import '../../../shared/location_reporter.dart';
 import '../../../shared/rider_map.dart';
 import '../../../shared/rider_style.dart';
 import '../../../shared/rider_widgets.dart';
+import '../../auth/data/pickup_points.dart';
 import '../../delivery/data/trip_repository.dart';
 import '../../delivery/presentation/delivery_controller.dart';
+import '../../delivery/presentation/delivery_screen.dart';
 import '../../offers/presentation/offer_detail_screen.dart'
     show deliveryMapRoute, offerArrival, offerMapRoute;
 import '../../delivery/presentation/delivery_texts.dart';
 import '../../my/data/profile.dart';
+import '../../notifications/presentation/notification_screen.dart';
 import '../../offers/domain/offer_list.dart';
 import '../../offers/presentation/offer_actions.dart';
 import '../../offers/presentation/offer_controllers.dart';
@@ -120,12 +123,17 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // 서버 지점 이름을 한 번 읽는다(카드·시트의 "PMart ○○지점").
+    ref.watch(storeNamesProvider);
     final l10n = AppLocalizations.of(context);
     final duty = ref.watch(dutyProvider);
     final st = duty.value;
     final onDuty = st?.onDuty ?? false;
     final poll = ref.watch(offerPollerProvider);
-    final group = onDuty
+    // 일반 배차모드는 홈에 AI 제안을 띄우지 않는다 — 배달리스트에서 골라 수락(원문 §2.2·2.4).
+    final normalMode =
+        ref.watch(dispatchModeProvider).value == DispatchMode.normal;
+    final group = onDuty && !normalMode
         ? groupOffers(poll.list?.offers ?? const []).firstOrNull
         : null;
     final offer = group?.first;
@@ -190,7 +198,17 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         ],
       );
     } else if (active.isNotEmpty) {
-      bottom = _ActiveCard(deliveryId: active.first, count: active.length);
+      // 진행 중 배송은 아래 시트(배송 화면)를 홈에 바로 띄운다(아래 Stack).
+      bottom = const SizedBox.shrink();
+    } else if (normalMode && st.newDispatchEnabled) {
+      // 일반 배차모드: 배달리스트(대기)로 안내.
+      bottom = GestureDetector(
+        onTap: () => context.push('/deliveries'),
+        child: _DarkNotice(
+          key: const ValueKey('normal-mode-notice'),
+          text: l10n.normalModeNotice,
+        ),
+      );
     } else if (!st.newDispatchEnabled || poll.stopped) {
       bottom = _DarkNotice(
         key: const ValueKey('polling-stopped'),
@@ -260,6 +278,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                       ),
                     ),
                   const Spacer(),
+                  // 알림함(지원센터 답장·문의 답변·계정 제한) — 안 읽은 수 배지.
+                  const NotificationBell(),
+                  const SizedBox(width: 10),
                   if (onDuty) ...[
                     MapCircleButton(
                       key: const ValueKey('my-page'),
@@ -315,6 +336,33 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               ),
             ),
           Align(alignment: Alignment.bottomCenter, child: bottom),
+          // 배차 수락 뒤(제안이 없을 때): 레퍼런스 image 14처럼 홈 지도 위에 배송 시트
+          // (예정·장소·도움요청|길찾기, 누르거나 위로 올리면 배달 정보). 따로 "배달 정보 보기"를 누르지 않는다.
+          if (offer == null && active.isNotEmpty)
+            Positioned.fill(
+              child: DeliveryScreen(
+                key: ValueKey('delivery-${active.first}'),
+                deliveryId: active.first,
+                embedded: true,
+              ),
+            ),
+          if (offer == null && active.length > 1)
+            SafeArea(
+              child: Padding(
+                padding: const EdgeInsets.only(top: 68),
+                child: Align(
+                  alignment: Alignment.topCenter,
+                  child: MapPill(
+                    key: const ValueKey('active-count'),
+                    onTap: () => context.push('/deliveries'),
+                    child: _PillLabel(
+                      icon: Icons.format_list_bulleted,
+                      text: l10n.activeCount(active.length),
+                    ),
+                  ),
+                ),
+              ),
+            ),
         ],
       ),
     );
@@ -420,13 +468,13 @@ class _Panel extends StatelessWidget {
   );
 }
 
-class _StartPanel extends StatelessWidget {
+class _StartPanel extends ConsumerWidget {
   const _StartPanel({required this.onStart});
 
   final VoidCallback onStart;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final l10n = AppLocalizations.of(context);
     return _Panel(
       child: Column(
@@ -434,7 +482,12 @@ class _StartPanel extends StatelessWidget {
         children: [
           const SizedBox(height: 8),
           Text(
-            l10n.riderGreeting,
+            riderGreetingText(
+              ref.watch(profileProvider).value?.name,
+              l10n.riderGreetingNamed,
+              l10n.riderGreeting,
+            ),
+            key: const ValueKey('rider-greeting'),
             style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
           ),
           const SizedBox(height: 6),
@@ -757,114 +810,6 @@ class _ActiveSlim extends StatelessWidget {
                 ),
               ),
               const Icon(Icons.chevron_right, color: RiderColors.sub),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// 진행 중 배송 요약(지도 아래 시트). 누르면 수행 화면으로 간다.
-class _ActiveCard extends ConsumerWidget {
-  const _ActiveCard({required this.deliveryId, required this.count});
-
-  final String deliveryId;
-  final int count;
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final l10n = AppLocalizations.of(context);
-    final d = ref.watch(deliveryProvider(deliveryId)).value;
-    // 전달지는 픽업 뒤에만 연다(그 전에는 부르지 않는다).
-    final drop = d != null && !isPickupStage(d.state)
-        ? ref.watch(dropInfoProvider(deliveryId)).value
-        : null;
-    void open() => context.push('/deliveries/$deliveryId');
-    return Material(
-      key: ValueKey('delivery-$deliveryId'),
-      color: Colors.white,
-      elevation: 8,
-      child: InkWell(
-        onTap: open,
-        child: SafeArea(
-          top: false,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Center(
-                child: Container(
-                  width: 40,
-                  height: 4,
-                  margin: const EdgeInsets.only(top: 8),
-                  decoration: BoxDecoration(
-                    color: RiderColors.line,
-                    borderRadius: BorderRadius.circular(2),
-                  ),
-                ),
-              ),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 12, 16, 18),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      d == null
-                          ? l10n.deliveryNumber(deliveryId)
-                          : executionText(l10n, d.state),
-                      style: TextStyle(
-                        fontSize: 15,
-                        fontWeight: FontWeight.w800,
-                        color: d == null
-                            ? RiderColors.sub
-                            : stageColor(d.state),
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                    Text(
-                      d == null
-                          ? ''
-                          : isPickupStage(d.state)
-                          ? storeText(l10n, d.mfcId)
-                          : (drop?.roadAddress ?? l10n.dropInfoUnavailable),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontSize: 20),
-                    ),
-                    if (count > 1) ...[
-                      const SizedBox(height: 4),
-                      Text(
-                        l10n.activeCount(count),
-                        style: const TextStyle(
-                          fontSize: 13,
-                          color: RiderColors.sub,
-                        ),
-                      ),
-                    ],
-                  ],
-                ),
-              ),
-              const Divider(),
-              SizedBox(
-                height: 56,
-                child: Center(
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        l10n.openDelivery,
-                        style: const TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w700,
-                          color: RiderColors.ink,
-                        ),
-                      ),
-                      const Icon(Icons.chevron_right, color: RiderColors.ink),
-                    ],
-                  ),
-                ),
-              ),
             ],
           ),
         ),

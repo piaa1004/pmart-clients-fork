@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import 'features/auth/data/session.dart';
+import 'features/auth/presentation/fee_guide_screen.dart';
 import 'features/auth/presentation/login_screen.dart';
 import 'features/auth/presentation/signup_screens.dart';
 import 'features/delivery/presentation/delivery_list_screen.dart';
@@ -12,8 +13,11 @@ import 'features/delivery/presentation/qr_pickup_screen.dart';
 import 'features/delivery/presentation/support_screen.dart';
 import 'features/delivery/presentation/support_thread_screen.dart';
 import 'features/home/presentation/home_screen.dart';
+import 'features/inquiries/presentation/inquiry_screens.dart';
+import 'features/notifications/presentation/notification_screen.dart';
 import 'features/my/presentation/my_screens.dart';
 import 'features/my/presentation/record_screens.dart';
+import 'features/my/presentation/withdraw_screen.dart';
 import 'features/offers/presentation/offer_detail_screen.dart';
 
 /// 라우트. 로그인하지 않았으면 로그인·가입 화면만 열린다. 알림 딥링크는 푸시(BR-09) 결정 뒤 붙인다.
@@ -45,6 +49,7 @@ final routerProvider = Provider<GoRouter>((ref) {
         builder: (_, _) => const SignupIntroScreen(),
       ),
       GoRoute(path: '/signup', builder: (_, _) => const SignupFlowScreen()),
+      GoRoute(path: '/signup/fees', builder: (_, _) => const FeeGuideScreen()),
       GoRoute(
         path: '/signup/terms/:type',
         builder: (_, s) => TermsScreen(type: s.pathParameters['type']!),
@@ -107,6 +112,25 @@ final routerProvider = Provider<GoRouter>((ref) {
         builder: (_, _) => const SettlementsScreen(),
       ),
       GoRoute(path: '/my/history', builder: (_, _) => const HistoryScreen()),
+      // 배송 밖 문의(case-service, 라이더 토큰)·알림함(notification).
+      GoRoute(
+        path: '/my/inquiries',
+        builder: (_, _) => const InquiryListScreen(),
+      ),
+      GoRoute(
+        path: '/my/inquiries/new',
+        builder: (_, _) => const InquiryNewScreen(),
+      ),
+      GoRoute(
+        path: '/my/inquiries/:inquiryId',
+        builder: (_, s) =>
+            InquiryDetailScreen(inquiryId: s.pathParameters['inquiryId']!),
+      ),
+      GoRoute(path: '/my/withdraw', builder: (_, _) => const WithdrawScreen()),
+      GoRoute(
+        path: '/notifications',
+        builder: (_, _) => const NotificationScreen(),
+      ),
     ],
   );
 });

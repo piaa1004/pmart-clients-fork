@@ -280,9 +280,12 @@ class _Bubble extends StatelessWidget {
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: Text(
-                  message.text,
+                  message.masked
+                      ? AppLocalizations.of(context).supportMasked
+                      : message.text,
                   style: TextStyle(
                     fontSize: 15,
+                    fontStyle: message.masked ? FontStyle.italic : null,
                     height: 1.4,
                     color: mine ? Colors.white : RiderColors.ink,
                   ),

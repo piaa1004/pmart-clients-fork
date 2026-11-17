@@ -28,7 +28,8 @@ class DeliveryListScreen extends ConsumerStatefulWidget {
 }
 
 class _DeliveryListScreenState extends ConsumerState<DeliveryListScreen> {
-  /// 0 = 진행, 1 = 대기.
+  /// 0 = 진행, 1 = 대기. 고르기 전에는 일반 배차모드면 대기부터(사용자 요청 2026-11-17).
+  int? _picked;
   int _tab = 0;
   Timer? _poll;
 
@@ -56,6 +57,7 @@ class _DeliveryListScreenState extends ConsumerState<DeliveryListScreen> {
     final duty = ref.watch(dutyProvider).value;
     final normalMode =
         ref.watch(dispatchModeProvider).value == DispatchMode.normal;
+    _tab = _picked ?? (normalMode ? 1 : 0);
     final waiting = normalMode && _tab == 1
         ? ref.watch(waitingListProvider)
         : null;
@@ -86,7 +88,7 @@ class _DeliveryListScreenState extends ConsumerState<DeliveryListScreen> {
               active: ids.length,
               waiting: waiting?.value?.items.length,
               onTab: (i) {
-                setState(() => _tab = i);
+                setState(() => _picked = i);
                 if (i == 1) ref.invalidate(waitingListProvider);
               },
             ),
@@ -94,7 +96,9 @@ class _DeliveryListScreenState extends ConsumerState<DeliveryListScreen> {
             Expanded(
               child: _Waiting(
                 state: waiting,
-                onAssigned: () => setState(() => _tab = 0),
+                // 수락해도 대기 목록에 머문다 — 이어서 다른 배송을 수락할 수 있게(사용자 요청
+                // 2026-11-17). 목록을 다시 읽어 수락한 배송을 빼고, 진행 수(탭)는 늘어난다.
+                onAssigned: () => ref.invalidate(waitingListProvider),
               ),
             )
           else ...[
@@ -322,8 +326,9 @@ class _Tabs extends StatelessWidget {
     );
     return Row(
       children: [
-        item(0, l10n.tabActive, active),
+        // 대기가 먼저(왼쪽) — 일반 배차모드에서 라이더가 고를 배송.
         item(1, l10n.tabWaiting, waiting),
+        item(0, l10n.tabActive, active),
       ],
     );
   }

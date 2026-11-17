@@ -40,13 +40,18 @@ const _postcodeHtml = '''
 <html><head>
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
 <style>html,body,#wrap{margin:0;padding:0;width:100%;height:100%;}</style>
-<script src="https://t1.daumcdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js"></script>
+<script src="https://t1.kakaocdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js"></script>
 </head><body><div id="wrap"></div>
 <script>
-  new daum.Postcode({
+  // 2026 도메인·이름 변경: t1.daumcdn.net → t1.kakaocdn.net, daum.Postcode → kakao.Postcode.
+  // 옛 주소를 쓰면 검색 창 위에 개발자용 변경 안내가 라이더에게 보인다.
+  var Postcode = (window.kakao && kakao.Postcode) || daum.Postcode;
+  new Postcode({
     oncomplete: function(data) {
       window.flutter_inappwebview.callHandler('onComplete', JSON.stringify(data));
     },
+    // 라이더에게 서비스 공지·배너를 보이지 않는다.
+    banner: false,
     width: '100%', height: '100%'
   }).embed(document.getElementById('wrap'));
 </script>

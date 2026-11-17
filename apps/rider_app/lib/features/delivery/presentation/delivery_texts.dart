@@ -23,7 +23,8 @@ String executionText(AppLocalizations l10n, ExecutionState s) => switch (s) {
 /// 픽업지 이름. 지점 목록(목)에 있으면 한글 지점명, 없으면 센터 코드.
 String storeText(AppLocalizations l10n, String? mfcId) => switch (mfcId) {
   null => l10n.storeUnknown,
-  final id => l10n.storeLabel(mfcById(id)?.name ?? id),
+  // 이름을 모르면(서버 지점 목록을 아직 못 읽음) 코드를 보인다.
+  final id => l10n.storeLabel(storeNameOf(id) ?? id),
 };
 
 /// 단말 시각 → "HH:mm"(Asia/Seoul 표시).

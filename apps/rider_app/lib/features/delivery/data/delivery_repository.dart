@@ -34,10 +34,14 @@ abstract interface class DeliveryRepository {
 
   /// 도움요청 상태·지원센터 접수번호(requestId = 멱등 키). 아직 모르면 [HelpState.unknown].
   Future<HelpStatusView> helpStatus(String deliveryId, IdempotencyKey key);
+
+  /// 이 배송에서 내가 보낸 도움요청(오래된 것부터, execution 0.7.0 `GET …/help-requests`).
+  /// 앱을 다시 켜도 보낸 요청·대화가 남게 한다.
+  Future<List<HelpRecord>> helpRequests(String deliveryId);
 }
 
-/// 지원센터 상담 대화(도움요청 한 건 = 대화 한 줄기). 라이더용 대화 API 가 계약에 없다 —
-/// 목에서만 쓰고, 실서버는 [SupportThreadUnavailable](백엔드 요청 §11).
+/// 지원센터 상담 대화(도움요청 한 건 = 대화 한 줄기). delivery-execution 0.6.0
+/// `GET/POST /deliveries/{id}/help-requests/{requestId}/messages`(백엔드 회신 2026-11-16).
 abstract interface class SupportThreadRepository {
   /// 오래된 것부터.
   Future<List<SupportMessage>> threadMessages(
@@ -54,15 +58,30 @@ abstract interface class SupportThreadRepository {
   });
 }
 
-/// 실서버: 계약이 없어 부르지 않는다.
+/// 실서버 대화. 처리 끝난(RESOLVED) 도움요청에 쓰면 409 HELP_REQUEST_CLOSED — 화면은 처리 완료로 보인다.
+/// 메시지 내용은 로그에 남기지 않는다(pmartGuard 는 본문을 남기지 않는다).
 final class ApiSupportThreadRepository implements SupportThreadRepository {
-  const ApiSupportThreadRepository();
+  ApiSupportThreadRepository(Dio dio)
+    : _exec = ex.PmartApiDeliveryExecution(dio: dio).getExecutionApi();
+
+  final ex.ExecutionApi _exec;
 
   @override
   Future<List<SupportMessage>> threadMessages(
     String deliveryId,
     String requestId,
-  ) => Future.error(const SupportThreadUnavailable());
+  ) async {
+    final res = await pmartGuard(
+      () => _exec.listHelpRequestMessages(
+        deliveryId: deliveryId,
+        requestId: requestId,
+      ),
+    );
+    return [
+      for (final m in res.data?.items ?? const <ex.HelpMessage>[])
+        supportMessageFromContract(m),
+    ];
+  }
 
   @override
   Future<void> sendMessage(
@@ -70,8 +89,32 @@ final class ApiSupportThreadRepository implements SupportThreadRepository {
     String requestId,
     String text, {
     required IdempotencyKey key,
-  }) => Future.error(const SupportThreadUnavailable());
+  }) async {
+    await pmartGuard(
+      () => _exec.postHelpRequestMessage(
+        deliveryId: deliveryId,
+        requestId: requestId,
+        idempotencyKey: key.value,
+        xSourceSystem: sourceSystem,
+        postHelpRequestMessageRequest: ex.PostHelpRequestMessageRequest(
+          body: text,
+        ),
+        extra: commandOptions(key).extra,
+      ),
+    );
+  }
 }
+
+/// 계약 메시지 → 화면 모델. 상담원 ID 는 라이더에게 오지 않는다("지원센터"로 보인다).
+SupportMessage supportMessageFromContract(ex.HelpMessage m) => SupportMessage(
+  id: m.messageId,
+  sender: m.senderType == ex.HelpMessageSenderTypeEnum.RIDER
+      ? SupportSender.rider
+      : SupportSender.agent,
+  text: m.body ?? '',
+  at: m.createdAt,
+  masked: m.masked == true || m.body == null,
+);
 
 /// 배차취소(delivery-dispatch `POST /deliveries/{id}/assignment-cancellations`). 수락 전 "거절"과 다른 행위다.
 abstract interface class AssignmentCancelRepository {
@@ -369,7 +412,31 @@ final class ApiDeliveryRepository implements DeliveryRepository {
       return (state: HelpState.unknown, caseId: null);
     }
   }
+
+  @override
+  Future<List<HelpRecord>> helpRequests(String deliveryId) async {
+    final res = await pmartGuard(
+      () => _exec.listHelpRequests(deliveryId: deliveryId),
+    );
+    return [
+      for (final h in res.data?.items ?? const <ex.HelpRequest>[])
+        if (h.requestId case final id?)
+          (
+            requestId: id,
+            category: helpCategoryFromWire(h.category),
+            detail: h.detail,
+            sentAt: h.createdAt ?? DateTime.now(),
+            state: helpStateFromWire(h.state?.value),
+            caseId: h.caseId,
+          ),
+    ];
+  }
 }
+
+HelpCategory helpCategoryFromWire(String? w) => HelpCategory.values.firstWhere(
+  (c) => helpCategoryToContract(c).value == w,
+  orElse: () => HelpCategory.other,
+);
 
 final class ApiHandoverRepository implements HandoverRepository {
   ApiHandoverRepository(Dio dio)

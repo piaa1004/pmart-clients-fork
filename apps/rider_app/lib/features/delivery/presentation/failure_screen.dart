@@ -37,13 +37,37 @@ class _FailureScreenState extends ConsumerState<FailureScreen> {
 
   String get _id => widget.deliveryId;
 
+  /// 전달 불가 알리기 → (등록되면) 같은 내용으로 지원센터 대화를 열고 대화 화면으로 간다.
+  /// 전달 불가 등록은 운영자 확인 대기열로만 가고 상담원과 대화할 수 없어서, 라이더가 도움요청을
+  /// 따로 다시 보내야 했다(사용자 지적 2026-11-17). 계약상 실패 등록 뒤에도 도움요청을 보낼 수 있다.
   Future<void> _submit(FailureReason reason) async {
+    final l10n = AppLocalizations.of(context);
     setState(() => _sending = true);
-    await ref.read(deliveryFlowProvider(_id).notifier).reportFailure(reason);
+    final flow = ref.read(deliveryFlowProvider(_id).notifier);
+    await flow.reportFailure(reason);
     if (!mounted) return;
-    setState(() => _sending = false);
     final d = await ref.read(deliveryProvider(_id).future);
-    if (mounted && d.state == ExecutionState.failureReported) context.pop();
+    if (!mounted) return;
+    if (d.state != ExecutionState.failureReported) {
+      setState(() => _sending = false);
+      return;
+    }
+    final photo = ref.read(deliveryFlowProvider(_id)).photoRef;
+    await ref
+        .read(helpFlowProvider(_id).notifier)
+        .send(
+          helpCategoryForFailure(reason),
+          detail: l10n.failureHelpDetail(failureReasonText(l10n, reason)),
+          evidenceRefs: [?photo],
+        );
+    if (!mounted) return;
+    final last = ref.read(helpFlowProvider(_id)).last;
+    if (last != null && last.state != null && last.state != HelpState.unknown) {
+      context.pushReplacement('/deliveries/$_id/support/${last.key.value}');
+    } else {
+      // 대화를 못 열었으면 배송 화면으로(지원센터에서 다시 보낼 수 있다).
+      context.pop();
+    }
   }
 
   @override

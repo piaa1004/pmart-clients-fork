@@ -17,7 +17,6 @@ import '../../../shared/ui_state_of.dart';
 import '../../offers/presentation/offer_controllers.dart';
 import '../data/trip_repository.dart';
 import '../domain/delivery.dart';
-import '../domain/trip.dart';
 import 'delivery_controller.dart';
 import 'delivery_texts.dart';
 import 'phone_caller.dart';
@@ -30,9 +29,17 @@ import 'trip_widgets.dart';
 /// 지도(픽업·전달 핀과 직선) 위에 시트를 둔다. 접힌 시트에는 단계·장소·예정 시각과
 /// [도움요청][길찾기], 위로 끌어 올리면 픽업지·가게 전화·주문정보(전달 단계는 전달지·요청사항)가 보인다.
 class DeliveryScreen extends ConsumerStatefulWidget {
-  const DeliveryScreen({super.key, required this.deliveryId});
+  const DeliveryScreen({
+    super.key,
+    required this.deliveryId,
+    this.embedded = false,
+  });
 
   final String deliveryId;
+
+  /// 홈 지도 위에 시트만 얹는다(레퍼런스 image 14 — 배차 수락 뒤 홈에서 바로 이 시트가 보인다).
+  /// 지도·위쪽 버튼은 홈 것을 쓴다.
+  final bool embedded;
 
   @override
   ConsumerState<DeliveryScreen> createState() => _DeliveryScreenState();
@@ -40,6 +47,140 @@ class DeliveryScreen extends ConsumerStatefulWidget {
 
 class _DeliveryScreenState extends ConsumerState<DeliveryScreen> {
   bool _hydrated = false;
+
+  /// 아래 시트(레퍼런스 image 14·15): 기본은 예정·장소·도움요청|길찾기까지(그 높이를 재서 맞춘다),
+  /// 회색바·헤더를 누르거나 위로 올리면 배달 정보와 진행 버튼.
+  static const _sheetFull = 0.92;
+  final _sheet = DraggableScrollableController();
+  final _peekKey = GlobalKey();
+  double _peekPx = 190;
+  double _bodyHeight = 0;
+
+  /// 반 넘게 펼침(안내 문구 "눌러서 지도 보기").
+  bool _sheetOpen = false;
+
+  /// 기본 높이보다 올라감(진행 버튼을 띄운다).
+  bool _sheetRaised = false;
+
+  double get _peekSize => _bodyHeight <= 0
+      ? 0.3
+      : (_peekPx / _bodyHeight).clamp(0.05, 0.6).toDouble();
+
+  @override
+  void initState() {
+    super.initState();
+    _sheet.addListener(() {
+      final size = _sheet.size;
+      final open = size > (_peekSize + _sheetFull) / 2;
+      final raised = size > _peekSize + 0.03;
+      if ((open != _sheetOpen || raised != _sheetRaised) && mounted) {
+        setState(() {
+          _sheetOpen = open;
+          _sheetRaised = raised;
+        });
+      }
+    });
+  }
+
+  /// 기본 화면 내용의 실제 높이를 재서 접힌 높이로 쓴다(전달 단계·글자 크기마다 다르다).
+  void _measurePeek() {
+    if (!mounted) return;
+    final box = _peekKey.currentContext?.findRenderObject() as RenderBox?;
+    if (box == null || !box.hasSize) return;
+    final h = box.size.height;
+    if ((h - _peekPx).abs() < 0.5) return;
+    setState(() => _peekPx = h);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && !_sheetRaised && _sheet.isAttached) {
+        _sheet.jumpTo(_peekSize);
+      }
+    });
+  }
+
+  /// 전달 불가 대기(FAILURE_REPORTED) 동안 운영자 결정(확정·반려)을 확인한다.
+  Timer? _failurePoll;
+  static const _failurePollEvery = Duration(seconds: 8);
+  bool _resuming = false;
+
+  void _watchFailure(bool waiting) {
+    if (waiting && _failurePoll == null) {
+      _failurePoll = Timer.periodic(_failurePollEvery, (_) {
+        if (mounted) ref.invalidate(deliveryProvider(_id));
+      });
+    } else if (!waiting && _failurePoll != null) {
+      _failurePoll!.cancel();
+      _failurePoll = null;
+    }
+  }
+
+  /// 고객과 다시 연락돼 전달할 수 있다 → 지원센터 대화에 알리고 그 대화로 간다.
+  /// 전달 불가는 라이더가 직접 취소할 수 없다 — 운영자가 반려하면 원래 단계로 돌아온다(계약
+  /// failure-decisions REJECT). 반려되면 이 화면이 확인해 전달 단계로 바꾼다.
+  Future<void> _askResume(DeliveryView d) async {
+    final l10n = AppLocalizations.of(context);
+    final last = ref.read(helpFlowProvider(_id)).last;
+    if (last == null) {
+      // 대화가 아직 없으면 같은 내용으로 도움요청을 먼저 연다.
+      setState(() => _resuming = true);
+      await ref
+          .read(helpFlowProvider(_id).notifier)
+          .send(
+            HelpCategory.customerUnreachable,
+            detail: l10n.failureResumeMessage,
+          );
+      if (!mounted) return;
+      setState(() => _resuming = false);
+      final opened = ref.read(helpFlowProvider(_id)).last;
+      if (opened != null &&
+          opened.state != null &&
+          opened.state != HelpState.unknown) {
+        unawaited(context.push('/deliveries/$_id/support/${opened.key.value}'));
+      } else {
+        showRiderToast(context, l10n.helpUnknown);
+      }
+      return;
+    }
+    setState(() => _resuming = true);
+    var sent = false;
+    try {
+      await ref
+          .read(supportThreadRepositoryProvider)
+          .sendMessage(
+            _id,
+            last.key.value,
+            l10n.failureResumeMessage,
+            key: IdempotencyKey.generate(),
+          );
+      sent = true;
+    } on SupportThreadUnavailable {
+      // 실서버 대화 준비 전 — 대화 화면이 안내한다.
+    } on PmartFailure {
+      // 대화 화면에서 다시 보낼 수 있다.
+    }
+    if (!mounted) return;
+    setState(() => _resuming = false);
+    if (!sent) showRiderToast(context, l10n.failureResumeNotSent);
+    unawaited(context.push('/deliveries/$_id/support/${last.key.value}'));
+  }
+
+  @override
+  void dispose() {
+    _failurePoll?.cancel();
+    _sheet.dispose();
+    super.dispose();
+  }
+
+  /// 회색바·헤더를 누르면 펼치고, 펼친 상태에서 누르면 접는다.
+  void _toggleSheet() {
+    if (!_sheet.isAttached) return;
+    unawaited(
+      _sheet.animateTo(
+        _sheetRaised ? _peekSize : _sheetFull,
+        duration: const Duration(milliseconds: 250),
+        curve: Curves.easeOut,
+      ),
+    );
+  }
 
   /// 배차취소 키. 결과를 모르면 같은 키로만 다시 보낸다.
   IdempotencyKey? _cancelKey;
@@ -185,6 +326,18 @@ class _DeliveryScreenState extends ConsumerState<DeliveryScreen> {
   @override
   Widget build(BuildContext context) {
     final provider = deliveryProvider(_id);
+    // 전달 불가 대기 중에는 운영자 결정을 확인하고, 반려되면(원래 단계로) 알린다.
+    ref.listen(provider.select((a) => a.value?.state), (prev, next) {
+      _watchFailure(next == ExecutionState.failureReported);
+      if (prev == ExecutionState.failureReported &&
+          (next == ExecutionState.pickedUp ||
+              next == ExecutionState.arrivedAtCustomer)) {
+        showRiderToast(context, AppLocalizations.of(context).failureRejected);
+      }
+    });
+    _watchFailure(
+      ref.read(provider).value?.state == ExecutionState.failureReported,
+    );
     // 서버가 거절한 수행 명령은 코드 대신 알기 쉬운 말로 한 번 알리고 목록에서 지운다.
     ref.listen(deliveryQueueProvider(_id), (_, next) {
       final rejected = (next.value ?? const <QueueItem>[]).where(
@@ -202,6 +355,38 @@ class _DeliveryScreenState extends ConsumerState<DeliveryScreen> {
         }),
       );
     });
+    if (widget.embedded) {
+      // 홈 안: 준비되면 시트, 그 전·실패는 아래 작은 판에(지도를 가리지 않게).
+      final state = ref.watch(provider);
+      if (state case AsyncData(:final value)) return _ready(context, value);
+      final l10n = AppLocalizations.of(context);
+      return Align(
+        alignment: Alignment.bottomCenter,
+        child: Material(
+          color: Colors.white,
+          elevation: 8,
+          child: SafeArea(
+            top: false,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 14, 8, 14),
+              // 조회 실패를 빈 화면으로 두지 않는다.
+              child: state is AsyncError
+                  ? Row(
+                      key: const ValueKey('delivery-load-failed'),
+                      children: [
+                        Expanded(child: Text(l10n.deliveryLoadFailed)),
+                        TextButton(
+                          onPressed: () => ref.invalidate(provider),
+                          child: Text(l10n.retry),
+                        ),
+                      ],
+                    )
+                  : const LinearProgressIndicator(),
+            ),
+          ),
+        ),
+      );
+    }
     return Scaffold(
       backgroundColor: Colors.white,
       body: UiStateView<DeliveryView>(
@@ -270,181 +455,238 @@ class _DeliveryScreenState extends ConsumerState<DeliveryScreen> {
     final gone =
         d.state == ExecutionState.unassigned ||
         d.state == ExecutionState.cancelled;
-    final due = switch ((pickupStage, trip)) {
-      (true, TripInfo(:final pickupDueAt?)) => dueText(
-        l10n,
-        l10n.pickupDue,
-        pickupDueAt,
-      ),
-      (false, TripInfo(:final dropDueAt?)) when dropStage => dueText(
-        l10n,
-        l10n.dropDue,
-        dropDueAt,
-      ),
-      _ => null,
-    };
+    // 레퍼런스 image 14·17: "9분 후 픽업예정" / "전달예정 3분 지남".
+    final dueAt = pickupStage
+        ? trip?.pickupDueAt
+        : (dropStage ? trip?.dropDueAt : null);
+    final due = dueAt == null
+        ? null
+        : relativeDueText(
+            l10n,
+            pickupStage ? l10n.duePickupWord : l10n.dueDropWord,
+            dueAt,
+          );
+    final tint = stageColor(d.state);
 
-    final header = Padding(
-      padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            executionText(l10n, d.state),
-            key: const ValueKey('execution-state'),
-            style: TextStyle(
-              fontSize: 15,
-              fontWeight: FontWeight.w800,
-              color: stageColor(d.state),
-            ),
-          ),
-          const SizedBox(height: 6),
-          Text(
-            pickupStage ? storeName : address,
-            key: const ValueKey('place-title'),
-            style: const TextStyle(fontSize: 21, fontWeight: FontWeight.w700),
-          ),
-          if (due != null)
-            Padding(
-              padding: const EdgeInsets.only(top: 6),
-              child: Row(
-                children: [
-                  const Icon(
-                    Icons.schedule,
-                    size: 18,
-                    color: RiderColors.primary,
+    // 기본 화면(접힌 시트, 레퍼런스 image 14): 회색바 · 예정 · 장소 · 도움요청|길찾기.
+    final peek = Column(
+      key: _peekKey,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        // 회색바: 누르면 펼치기/접기, 끌어 올리면 펼치기(끌기는 시트가 받는다).
+        GestureDetector(
+          key: const ValueKey('sheet-handle'),
+          behavior: HitTestBehavior.opaque,
+          onTap: _toggleSheet,
+          child: Padding(
+            padding: const EdgeInsets.only(top: 8, bottom: 2),
+            child: Column(
+              children: [
+                Container(
+                  width: 40,
+                  height: 5,
+                  decoration: BoxDecoration(
+                    color: RiderColors.line,
+                    borderRadius: BorderRadius.circular(3),
                   ),
-                  const SizedBox(width: 4),
-                  Text(
-                    due,
-                    key: const ValueKey('due-time'),
-                    style: const TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w700,
-                      color: RiderColors.ink,
+                ),
+                const SizedBox(height: 2),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Text(
+                      _sheetOpen ? l10n.sheetCollapse : l10n.dragForDetail,
+                      key: const ValueKey('sheet-hint'),
+                      style: const TextStyle(
+                        fontSize: 11,
+                        color: RiderColors.hint,
+                      ),
                     ),
-                  ),
-                ],
-              ),
-            ),
-          if (busy)
-            Padding(
-              padding: const EdgeInsets.only(top: 6),
-              child: Text(
-                queue.any((q) => q.state == QueueItemState.checking)
-                    ? l10n.doNotRepeat
-                    : l10n.sendingNow,
-                key: const ValueKey('sending'),
-                style: const TextStyle(fontSize: 13, color: RiderColors.sub),
-              ),
-            ),
-          const SizedBox(height: 12),
-          Row(
-            children: [
-              Expanded(
-                child: RiderOutlineButton(
-                  key: const ValueKey('help'),
-                  icon: Icons.sms_outlined,
-                  label: l10n.helpRequest,
-                  onPressed: help.sending || gone ? null : () => _openHelp(d),
+                    Icon(
+                      _sheetOpen
+                          ? Icons.keyboard_arrow_down
+                          : Icons.keyboard_arrow_up,
+                      size: 14,
+                      color: RiderColors.hint,
+                    ),
+                  ],
                 ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: RiderOutlineButton(
-                  key: const ValueKey('navigate'),
-                  icon: Icons.navigation_outlined,
-                  label: l10n.navigate,
-                  onPressed: () => pickupStage
-                      ? _navigate(name: storeName, to: store?.point)
-                      : _navigate(name: l10n.naviDropName, to: dropPoint),
-                ),
-              ),
-            ],
+              ],
+            ),
           ),
-          // 전달 단계: "'여기에 두었어요' 알리기" → 촬영하기 창 → 올리면 닫힘 → 전달완료.
-          if (d.state == ExecutionState.pickedUp ||
-              d.state == ExecutionState.arrivedAtCustomer) ...[
-            const SizedBox(height: 10),
-            RiderOutlineButton(
-              key: const ValueKey('photo'),
-              accent: true,
-              height: 52,
-              icon: Icons.photo_camera_outlined,
-              label: flow.photoRef == null
-                  ? l10n.takePhoto
-                  : l10n.photoUploaded,
-              onPressed: () => context.push('/deliveries/$_id/photo'),
-            ),
-            if (flow.uploadFailed)
-              Padding(
-                padding: const EdgeInsets.only(top: 6),
-                child: Text(
-                  l10n.uploadFailed,
-                  key: const ValueKey('upload-failed'),
-                  style: const TextStyle(
-                    fontSize: 13,
-                    color: RiderColors.danger,
-                  ),
-                ),
-              ),
-          ],
-          // 보낸 도움요청 진행상황 — 누르면 지원센터(보낸 요청·상담원 대화)로 다시 들어간다.
-          if (help.last case final last?)
-            Padding(
-              padding: const EdgeInsets.only(top: 10),
-              child: Material(
-                color: RiderColors.field,
-                borderRadius: BorderRadius.circular(8),
-                child: InkWell(
-                  key: const ValueKey('help-status'),
-                  borderRadius: BorderRadius.circular(8),
-                  onTap: () => _openHelp(d),
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(12, 10, 8, 10),
-                    child: Row(
-                      children: [
-                        const Icon(
-                          Icons.support_agent,
-                          size: 20,
-                          color: RiderColors.sub,
+        ),
+        // 헤더의 빈 곳을 눌러도 펼치기/접기.
+        GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: _toggleSheet,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // 예정(주황·파랑) ··· 지금 단계(레퍼런스의 회색 알약 자리).
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        due ?? executionText(l10n, d.state),
+                        key: ValueKey(
+                          due == null ? 'execution-state' : 'due-time',
                         ),
-                        const SizedBox(width: 6),
-                        Expanded(
-                          child: Text(
-                            [
-                              helpCategoryText(l10n, last.category),
-                              helpStateLook(l10n, last.state).$1,
-                              if (help.sentCount > 1)
-                                l10n.supportCount(help.sentCount),
-                            ].join(' · '),
-                            style: const TextStyle(fontSize: 14),
-                          ),
+                        style: TextStyle(
+                          fontSize: 17,
+                          fontWeight: FontWeight.w800,
+                          color: tint,
                         ),
-                        Text(
-                          l10n.supportOpenThread,
+                      ),
+                    ),
+                    if (due != null)
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 5,
+                        ),
+                        decoration: BoxDecoration(
+                          color: RiderColors.field,
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                        child: Text(
+                          executionText(l10n, d.state),
+                          key: const ValueKey('execution-state'),
                           style: const TextStyle(
-                            fontSize: 13,
-                            fontWeight: FontWeight.w700,
-                            color: RiderColors.primary,
+                            fontSize: 12,
+                            color: RiderColors.sub,
                           ),
                         ),
-                        const Icon(
-                          Icons.chevron_right,
-                          size: 18,
-                          color: RiderColors.primary,
-                        ),
-                      ],
-                    ),
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  pickupStage ? storeName : address,
+                  key: const ValueKey('place-title'),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 22,
+                    fontWeight: FontWeight.w500,
+                    color: RiderColors.ink,
                   ),
                 ),
-              ),
+                if (busy)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 4),
+                    child: Text(
+                      queue.any((q) => q.state == QueueItemState.checking)
+                          ? l10n.doNotRepeat
+                          : l10n.sendingNow,
+                      key: const ValueKey('sending'),
+                      style: const TextStyle(
+                        fontSize: 13,
+                        color: RiderColors.sub,
+                      ),
+                    ),
+                  ),
+              ],
             ),
-        ],
-      ),
+          ),
+        ),
+        _SplitActions(
+          onHelp: help.sending || gone ? null : () => _openHelp(d),
+          onNavigate: () => pickupStage
+              ? _navigate(name: storeName, to: store?.point)
+              : _navigate(name: l10n.naviDropName, to: dropPoint),
+        ),
+      ],
     );
 
+    // 펼친 시트(레퍼런스 image 15·17): 회색 띠 아래 배달 정보.
     final details = <Widget>[
+      Container(height: 8, color: RiderColors.field),
+      // 보낸 도움요청 진행상황 — 누르면 지원센터(보낸 요청·상담원 대화)로 다시 들어간다.
+      if (help.last case final last?)
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+          child: Material(
+            color: RiderColors.field,
+            borderRadius: BorderRadius.circular(8),
+            child: InkWell(
+              key: const ValueKey('help-status'),
+              borderRadius: BorderRadius.circular(8),
+              onTap: () => _openHelp(d),
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(12, 10, 8, 10),
+                child: Row(
+                  children: [
+                    const Icon(
+                      Icons.support_agent,
+                      size: 20,
+                      color: RiderColors.sub,
+                    ),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        [
+                          helpCategoryText(l10n, last.category),
+                          helpStateLook(l10n, last.state).$1,
+                          if (help.sentCount > 1)
+                            l10n.supportCount(help.sentCount),
+                        ].join(' · '),
+                        style: const TextStyle(fontSize: 14),
+                      ),
+                    ),
+                    Text(
+                      l10n.supportOpenThread,
+                      style: const TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                        color: RiderColors.primary,
+                      ),
+                    ),
+                    const Icon(
+                      Icons.chevron_right,
+                      size: 18,
+                      color: RiderColors.primary,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      // 전달 단계: "'여기에 두었어요' 알리기" → 촬영하기 창 → 올리면 닫힘 → 전달완료(image 17).
+      if (d.state == ExecutionState.pickedUp ||
+          d.state == ExecutionState.arrivedAtCustomer)
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              RiderOutlineButton(
+                key: const ValueKey('photo'),
+                accent: true,
+                height: 52,
+                icon: Icons.photo_camera_outlined,
+                label: flow.photoRef == null
+                    ? l10n.takePhoto
+                    : l10n.photoUploaded,
+                onPressed: () => context.push('/deliveries/$_id/photo'),
+              ),
+              if (flow.uploadFailed)
+                Padding(
+                  padding: const EdgeInsets.only(top: 6),
+                  child: Text(
+                    l10n.uploadFailed,
+                    key: const ValueKey('upload-failed'),
+                    style: const TextStyle(
+                      fontSize: 13,
+                      color: RiderColors.danger,
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
       if (pickupStage) ...[
         // 레퍼런스 image 12: 픽업지 주소 밑에 가게전화연결, 전달지 주소 밑에 고객전화연결.
         PlaceSection(
@@ -472,8 +714,6 @@ class _DeliveryScreenState extends ConsumerState<DeliveryScreen> {
           linkLocked: true,
           lockedNote: l10n.customerPhoneAfterPickup,
         ),
-        if (d.state == ExecutionState.arrivedAtStore)
-          _HandoverBox(delivery: d, flow: flow, ctl: ctl),
       ] else if (dropStage) ...[
         TripSection(
           icon: Icons.place_outlined,
@@ -512,177 +752,238 @@ class _DeliveryScreenState extends ConsumerState<DeliveryScreen> {
             style: const TextStyle(fontSize: 12, color: RiderColors.hint),
           ),
         ),
-      const SizedBox(height: 24),
     ];
 
-    return Scaffold(
-      backgroundColor: Colors.white,
-      body: Stack(
+    // 진행 버튼(가게 도착·픽업·전달 완료). 레퍼런스처럼 시트를 펼쳤을 때 아래에 뜬다.
+    final Widget? action = switch (d.state) {
+      ExecutionState.assigned => RiderButton(
+        key: const ValueKey('arrive-store'),
+        label: l10n.arriveStore,
+        onPressed: busy ? null : ctl.arriveAtStore,
+      ),
+      ExecutionState.arrivedAtStore => RiderButton(
+        key: const ValueKey('qr-pickup'),
+        icon: Icons.qr_code_scanner,
+        label: l10n.qrPickup,
+        onPressed: () => context.push('/deliveries/$_id/qr'),
+      ),
+      // 고객 도착은 따로 누르지 않는다(촬영 창이 대신 보낸다).
+      // 사진 올리기에 성공한 뒤에만 전달완료 → "어떻게 전달하셨나요?" 창.
+      ExecutionState.pickedUp ||
+      ExecutionState.arrivedAtCustomer => RiderButton(
+        key: const ValueKey('complete'),
+        label: l10n.completeDelivery,
+        onPressed: flow.photoRef != null && !busy ? _complete : null,
+      ),
+      // 전달 불가를 알린 뒤: 운영자 확인 대기 + 지원센터 대화(보낸 요청이 있으면 그 대화로).
+      ExecutionState.failureReported => Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Positioned.fill(child: RiderMap(route: route)),
-          SafeArea(
-            child: Padding(
-              padding: const EdgeInsets.all(12),
-              child: MapCircleButton(
-                key: const ValueKey('back'),
-                icon: Icons.arrow_back,
-                onTap: _back,
-              ),
-            ),
+          Text(
+            l10n.failureWaiting,
+            key: const ValueKey('failure-waiting'),
+            textAlign: TextAlign.center,
+            style: const TextStyle(fontSize: 14, color: RiderColors.sub),
           ),
-          DraggableScrollableSheet(
-            key: const ValueKey('delivery-sheet'),
-            initialChildSize: 0.42,
-            minChildSize: 0.3,
-            maxChildSize: 0.95,
-            snap: true,
-            builder: (context, scroll) => Material(
-              color: Colors.white,
-              elevation: 10,
-              borderRadius: const BorderRadius.vertical(
-                top: Radius.circular(14),
-              ),
-              clipBehavior: Clip.antiAlias,
-              child: SingleChildScrollView(
-                controller: scroll,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Center(
-                      child: Container(
-                        width: 44,
-                        height: 5,
-                        margin: const EdgeInsets.only(top: 8, bottom: 2),
-                        decoration: BoxDecoration(
-                          color: RiderColors.line,
-                          borderRadius: BorderRadius.circular(3),
-                        ),
-                      ),
-                    ),
-                    Center(
-                      child: Text(
-                        l10n.dragForDetail,
-                        style: const TextStyle(
-                          fontSize: 11,
-                          color: RiderColors.hint,
-                        ),
-                      ),
-                    ),
-                    header,
-                    const Divider(height: 1),
-                    ...details,
-                  ],
+          const SizedBox(height: 8),
+          // 고객에게 연락이 와서 전달할 수 있게 됐을 때.
+          RiderOutlineButton(
+            key: const ValueKey('failure-resume'),
+            accent: true,
+            height: 52,
+            icon: Icons.phone_callback_outlined,
+            label: l10n.failureResume,
+            onPressed: _resuming ? null : () => _askResume(d),
+          ),
+          const SizedBox(height: 8),
+          RiderButton(
+            key: const ValueKey('failure-talk'),
+            icon: Icons.support_agent,
+            label: l10n.failureTalk,
+            onPressed: () => help.last == null
+                ? _openHelp(d)
+                : context.push(
+                    '/deliveries/$_id/support/${help.last!.key.value}',
+                  ),
+          ),
+        ],
+      ),
+      ExecutionState.completed => null,
+      _ when gone => RiderButton(
+        key: const ValueKey('gone-ok'),
+        label: l10n.ok,
+        onPressed: _finish,
+      ),
+      _ => Text(l10n.contactSupport),
+    };
+    // 취소·전달 불가처럼 할 일이 정해진 상태는 접혀 있어도 보인다.
+    final actionAlways = gone || d.state == ExecutionState.failureReported;
+    final showAction = action != null && (_sheetRaised || actionAlways);
+
+    // 접힌 높이는 기본 화면 내용(_peekKey)을 잰 값으로 맞춘다.
+    WidgetsBinding.instance.addPostFrameCallback((_) => _measurePeek());
+
+    final stack = Stack(
+      fit: StackFit.expand,
+      children: [
+        if (!widget.embedded) ...[
+          Positioned.fill(child: RiderMap(route: route)),
+          Positioned(
+            top: 0,
+            left: 0,
+            child: SafeArea(
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: MapCircleButton(
+                  key: const ValueKey('back'),
+                  icon: Icons.arrow_back,
+                  onTap: _back,
                 ),
               ),
             ),
           ),
-          if (d.state == ExecutionState.completed)
-            Positioned.fill(child: _DoneOverlay(onClose: _finish)),
         ],
-      ),
-      bottomNavigationBar: d.state == ExecutionState.completed
-          ? null
-          : Material(
+        Positioned.fill(
+          child: LayoutBuilder(
+            builder: (context, box) {
+              _bodyHeight = box.maxHeight;
+              final peekSize = _peekSize;
+              return DraggableScrollableSheet(
+                key: const ValueKey('delivery-sheet'),
+                controller: _sheet,
+                initialChildSize: peekSize,
+                minChildSize: peekSize,
+                maxChildSize: _sheetFull,
+                // 끌어 올린 만큼 머문다(되돌아가지 않게 — 사용자 요청 2026-11-17).
+                snap: false,
+                builder: (context, scroll) => Material(
+                  color: Colors.white,
+                  elevation: 10,
+                  borderRadius: const BorderRadius.vertical(
+                    top: Radius.circular(14),
+                  ),
+                  clipBehavior: Clip.antiAlias,
+                  child: SingleChildScrollView(
+                    controller: scroll,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        peek,
+                        ...details,
+                        // 아래에 뜨는 진행 버튼이 마지막 내용을 가리지 않게.
+                        const SizedBox(height: 110),
+                      ],
+                    ),
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
+        if (showAction)
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: 0,
+            child: Material(
               color: Colors.white,
               elevation: 12,
               child: SafeArea(
                 top: false,
                 child: Padding(
                   padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
-                  child: switch (d.state) {
-                    ExecutionState.assigned => RiderButton(
-                      key: const ValueKey('arrive-store'),
-                      label: l10n.arriveStore,
-                      onPressed: busy ? null : ctl.arriveAtStore,
-                    ),
-                    ExecutionState.arrivedAtStore => RiderButton(
-                      key: const ValueKey('qr-pickup'),
-                      icon: Icons.qr_code_scanner,
-                      label: l10n.qrPickup,
-                      onPressed: () => context.push('/deliveries/$_id/qr'),
-                    ),
-                    // 고객 도착은 따로 누르지 않는다(촬영 창이 대신 보낸다).
-                    // 사진 올리기에 성공한 뒤에만 전달완료 → "어떻게 전달하셨나요?" 창.
-                    ExecutionState.pickedUp ||
-                    ExecutionState.arrivedAtCustomer => RiderButton(
-                      key: const ValueKey('complete'),
-                      label: l10n.completeDelivery,
-                      onPressed: flow.photoRef != null && !busy
-                          ? _complete
-                          : null,
-                    ),
-                    ExecutionState.failureReported => Text(
-                      l10n.failureWaiting,
-                      key: const ValueKey('failure-waiting'),
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(
-                        fontSize: 15,
-                        color: RiderColors.sub,
-                      ),
-                    ),
-                    _ when gone => RiderButton(
-                      key: const ValueKey('gone-ok'),
-                      label: l10n.ok,
-                      onPressed: _finish,
-                    ),
-                    _ => Text(l10n.contactSupport),
-                  },
+                  child: action,
                 ),
               ),
             ),
+          ),
+        if (d.state == ExecutionState.completed)
+          Positioned.fill(child: _DoneOverlay(onClose: _finish)),
+      ],
     );
+    if (widget.embedded) return stack;
+    return Scaffold(backgroundColor: Colors.white, body: stack);
   }
 }
 
-/// 가게 도착 뒤 포장 인계 진행.
-class _HandoverBox extends StatelessWidget {
-  const _HandoverBox({
-    required this.delivery,
-    required this.flow,
-    required this.ctl,
-  });
+/// 레퍼런스 image 14: 시트 아래 꽉 찬 반반 버튼 — 도움요청 | 길찾기.
+class _SplitActions extends StatelessWidget {
+  const _SplitActions({required this.onHelp, required this.onNavigate});
 
-  final DeliveryView delivery;
-  final DeliveryFlowState flow;
-  final DeliveryFlowController ctl;
+  final VoidCallback? onHelp;
+  final VoidCallback? onNavigate;
 
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
-    final packages = delivery.packageIds;
-    final done = packages
-        .where((p) => flow.phaseOf(p).phase == HandoverPhase.handedOver)
-        .length;
-    final allHanded = packages.isNotEmpty && done == packages.length;
     return Container(
-      width: double.infinity,
-      margin: const EdgeInsets.fromLTRB(16, 4, 16, 12),
-      color: RiderColors.field,
-      padding: const EdgeInsets.all(14),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      height: 58,
+      decoration: const BoxDecoration(
+        border: Border(top: BorderSide(color: RiderColors.line)),
+      ),
+      child: Row(
         children: [
-          Text(
-            l10n.handoverProgress(done, packages.length),
-            key: const ValueKey('handover-progress'),
-            style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
-          ),
-          for (final pkg in packages)
-            _PackageLine(
-              packageId: pkg,
-              handover: flow.phaseOf(pkg),
-              onCheckAgain: () => ctl.checkAgain(pkg),
+          Expanded(
+            child: _FlatAction(
+              key: const ValueKey('help'),
+              icon: Icons.notifications_active_outlined,
+              label: l10n.helpRequest,
+              onTap: onHelp,
             ),
-          if (!allHanded && done > 0)
-            Padding(
-              padding: const EdgeInsets.only(top: 6),
-              child: Text(
-                l10n.partialHandover,
-                key: const ValueKey('partial-handover'),
-                style: const TextStyle(fontSize: 13, color: RiderColors.pickup),
+          ),
+          const VerticalDivider(
+            width: 1,
+            thickness: 1,
+            color: RiderColors.line,
+          ),
+          Expanded(
+            child: _FlatAction(
+              key: const ValueKey('navigate'),
+              icon: Icons.map_outlined,
+              label: l10n.navigate,
+              onTap: onNavigate,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _FlatAction extends StatelessWidget {
+  const _FlatAction({
+    super.key,
+    required this.icon,
+    required this.label,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String label;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = onTap == null ? RiderColors.disabled : RiderColors.ink;
+    return InkWell(
+      onTap: onTap,
+      child: Center(
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 24, color: color),
+            const SizedBox(width: 6),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 17,
+                fontWeight: FontWeight.w700,
+                color: color,
               ),
             ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -753,50 +1054,6 @@ class _DropCard extends StatelessWidget {
             ),
           ),
       ],
-    );
-  }
-}
-
-class _PackageLine extends StatelessWidget {
-  const _PackageLine({
-    required this.packageId,
-    required this.handover,
-    required this.onCheckAgain,
-  });
-
-  final String packageId;
-  final PackageHandover handover;
-  final VoidCallback onCheckAgain;
-
-  @override
-  Widget build(BuildContext context) {
-    final l10n = AppLocalizations.of(context);
-    final done = handover.phase == HandoverPhase.handedOver;
-    return Padding(
-      key: ValueKey('pkg-$packageId'),
-      padding: const EdgeInsets.only(top: 8),
-      child: Row(
-        children: [
-          Icon(
-            done ? Icons.check_circle : Icons.qr_code_2,
-            size: 20,
-            color: done ? RiderColors.primary : RiderColors.sub,
-          ),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              '${l10n.packageLabel(packageId)} · ${handoverText(l10n, handover)}',
-              style: const TextStyle(fontSize: 14, color: RiderColors.sub),
-            ),
-          ),
-          if (handover.phase == HandoverPhase.checking)
-            TextButton(
-              key: ValueKey('check-$packageId'),
-              onPressed: onCheckAgain,
-              child: Text(l10n.checkAgain),
-            ),
-        ],
-      ),
     );
   }
 }

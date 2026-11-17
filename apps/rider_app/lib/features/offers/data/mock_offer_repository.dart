@@ -14,7 +14,8 @@ base class MockOfferRepository implements OfferRepository, DutyRepository {
   MockOfferRepository({
     this.latency = const Duration(milliseconds: 300),
     bool startOnDuty = true,
-    DispatchMode mode = DispatchMode.normal,
+    // 첫 가입 기본값(원문 §2.2).
+    DispatchMode mode = DispatchMode.aiRecommended,
     bool demoBundle = false,
   }) {
     if (demoBundle) {
@@ -97,7 +98,7 @@ base class MockOfferRepository implements OfferRepository, DutyRepository {
   final _responses = <String, Map<String, Object?>>{};
   var _settings = <String, Object?>{
     'oneAtATime': false,
-    'dispatchMode': 'NORMAL',
+    'dispatchMode': 'AI_RECOMMENDED',
     'version': 1,
   };
 
@@ -144,10 +145,12 @@ base class MockOfferRepository implements OfferRepository, DutyRepository {
     }
     final receiving =
         _duty['status'] == 'ON_DUTY' && _duty['newDispatchEnabled'] == true;
+    // 일반 배차모드는 제안을 보내지 않는다 — 배달리스트에서 골라 수락(원문 §2.2·2.4).
+    final aiMode = _settings['dispatchMode'] == 'AI_RECOMMENDED';
     return offerListFromContract(
       ListMyOffers200Response.fromJson({
         ...fixture,
-        'items': receiving ? _offers : const <Object?>[],
+        'items': receiving && aiMode ? _offers : const <Object?>[],
         'pollAfterSec': receiving ? 5 : null,
       }),
     );

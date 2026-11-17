@@ -41,13 +41,16 @@ const services = <String, List<String>>{
   'claim-service': ['customer'],
   'review-service': ['customer'],
   // 고객센터 문의(case 0.2.0 inquiries)·AI 상담(customer-assistant 0.1.0) — 백엔드 handoff 2026-11-09
-  'case-service': ['customer'],
+  'case-service': ['customer', 'rider'],
   'customer-assistant-service': ['customer'],
   'notification-service': ['customer', 'rider'],
   'delivery-tracking-service': ['customer', 'rider', 'mfc'],
   'delivery-dispatch-service': ['rider'],
   'delivery-execution-service': ['rider'],
   'rider-service': ['rider'],
+  // 라이더 Google 로그인·지점 목록(PC 5 rider-app, 2026-11-17 사용자 지시 — PC 1 알림 handoff rider-app/2026-11-17-pc1-gen-rider-auth-center-master.md)
+  'rider-auth-service': ['rider'],
+  'center-master-service': ['rider'],
   'mfc-fulfillment-service': ['mfc'],
   'mfc-capacity-service': ['mfc'],
   'mfc-inbound-service': ['mfc'],

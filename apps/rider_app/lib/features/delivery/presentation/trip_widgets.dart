@@ -349,6 +349,14 @@ class PlaceSection extends StatelessWidget {
 }
 
 /// 예정 시각 한 줄(예: "픽업 예정 14:32 · 약 6분").
+/// 레퍼런스 image 14·17: "9분 후 픽업예정" / "전달예정 3분 지남" / "곧 픽업예정".
+String relativeDueText(AppLocalizations l10n, String what, DateTime at) {
+  final minutes = at.difference(DateTime.now()).inMinutes;
+  if (minutes > 0) return l10n.dueIn(minutes, what);
+  if (minutes < 0) return l10n.dueLate(-minutes, what);
+  return l10n.dueNow(what);
+}
+
 String dueText(
   AppLocalizations l10n,
   String Function(String) label,

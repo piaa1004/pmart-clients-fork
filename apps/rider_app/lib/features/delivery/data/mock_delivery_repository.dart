@@ -326,7 +326,8 @@ base class MockDeliveryRepository
           reject = HandoverProblemCode.contactAttemptsRequired;
         } else if (d['state'] == 'PICKED_UP' ||
             d['state'] == 'ARRIVED_AT_CUSTOMER') {
-          // 운영자 확정 전까지 진행 중(FAILURE_REPORTED).
+          // 운영자 확정 전까지 진행 중(FAILURE_REPORTED). 반려되면 이 상태로 돌아간다.
+          _beforeFailure[item.targetId] = d['state']! as String;
           next = 'FAILURE_REPORTED';
         }
     }
@@ -381,7 +382,40 @@ base class MockDeliveryRepository
   static const assignAfter = Duration(seconds: 10);
   static const replyAfter = Duration(seconds: 4);
 
+  /// 라이더가 대화에 이 말을 쓰면(고객과 다시 연락돼 전달할 수 있음) 상담원이 전달 불가를
+  /// 반려한다(운영자 REJECT → 실패 등록 전 상태). 목 상담원 흉내다.
+  static const resumeHint = '전달할 수 있어요';
+
+  final _beforeFailure = <String, String>{};
+  final _helpDelivery = <String, String>{};
+  final _helpCategory = <String, HelpCategory>{};
+
+  @override
+  Future<List<HelpRecord>> helpRequests(String deliveryId) async {
+    await _wait();
+    return [
+      for (final id in _helpAt.keys)
+        if (_helpDelivery[id] == deliveryId)
+          () {
+            _advance(id);
+            return (
+              requestId: id,
+              category: _helpCategory[id] ?? HelpCategory.other,
+              detail: helpDetails[id],
+              sentAt: _helpAt[id]!,
+              state: _helpResolved.contains(id)
+                  ? HelpState.resolved
+                  : _helpCase.containsKey(id)
+                  ? HelpState.inProgress
+                  : HelpState.open,
+              caseId: _helpCase[id],
+            );
+          }(),
+    ];
+  }
+
   final _helpAt = <String, DateTime>{};
+  final _helpAnswered = <String, int>{};
   final _helpCase = <String, String>{};
   final _helpResolved = <String>{};
   final _threads = <String, List<SupportMessage>>{};
@@ -404,6 +438,8 @@ base class MockDeliveryRepository
   }) async {
     await _wait();
     _helpAt.putIfAbsent(key.value, clock);
+    _helpDelivery[key.value] = deliveryId;
+    _helpCategory[key.value] = category;
     helpDetails[key.value] = detail;
     if (loseNextHelpResponse) {
       loseNextHelpResponse = false;
@@ -436,19 +472,43 @@ base class MockDeliveryRepository
         ),
       );
     }
-    final last = thread.lastOrNull;
+    // 아직 답하지 않은 라이더 메시지(상담원 배정 전에 쓴 것도 배정 뒤에 답한다).
+    final riderMsgs = thread.where((m) => m.sender == SupportSender.rider);
+    final riderSaid = riderMsgs.length;
+    final last = riderMsgs.lastOrNull;
+    final caseAt = at.add(assignAfter);
+    final replyAt = last == null
+        ? now
+        : (last.at.isAfter(caseAt) ? last.at : caseAt).add(replyAfter);
     if (_helpCase.containsKey(id) &&
         !_helpResolved.contains(id) &&
         last != null &&
-        last.sender == SupportSender.rider &&
-        now.difference(last.at) >= replyAfter) {
-      final riderSaid = thread
-          .where((m) => m.sender == SupportSender.rider)
-          .length;
+        riderSaid > (_helpAnswered[id] ?? 0) &&
+        !now.isBefore(replyAt)) {
+      _helpAnswered[id] = riderSaid;
+      // 고객과 다시 연락돼 전달할 수 있다 → 전달 불가 반려(실패 등록 전 상태로).
+      final deliveryId = _helpDelivery[id];
+      final d = deliveryId == null ? null : _deliveries[deliveryId];
+      if (last.text.contains(resumeHint) &&
+          d != null &&
+          d['state'] == 'FAILURE_REPORTED') {
+        d
+          ..['state'] =
+              _beforeFailure.remove(deliveryId) ?? 'ARRIVED_AT_CUSTOMER'
+          ..['version'] = (d['version']! as int) + 1;
+        thread.add(
+          _msg(
+            SupportSender.agent,
+            '확인했어요. 전달 불가를 반려했으니 고객에게 전달을 계속해 주세요.',
+            replyAt,
+          ),
+        );
+        return;
+      }
       final reply = riderSaid >= 2
           ? '확인 후 처리했어요. 더 필요한 게 있으면 새 도움요청을 보내 주세요.'
           : '알려 주셔서 감사해요. 매장과 확인해서 바로 안내드릴게요.';
-      thread.add(_msg(SupportSender.agent, reply, last.at.add(replyAfter)));
+      thread.add(_msg(SupportSender.agent, reply, replyAt));
       if (riderSaid >= 2) _helpResolved.add(id);
     }
   }

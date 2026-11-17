@@ -1,11 +1,13 @@
+import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:pmart_api_rider/pmart_api_rider.dart' as rd;
+import 'package:pmart_core/pmart_core.dart';
 
 import '../../../shared/mfc_directory.dart';
+import '../../../shared/providers.dart';
 
-/// 배달 수단. motorcycle·bicycle·car·walk 는 rider-service `VehicleType`,
-/// eBike(전기자전거)·kickboard(킥보드)는 계약에 아직 없다 — 목에서만 쓴다
-/// (백엔드 요청: 계약 추가 + 수행료는 자전거와 같게, 사용자 요청 2026-11-16).
+/// 배달 수단 = rider-service `VehicleType`(E_BIKE·KICKBOARD 는 2026-11-16 계약 추가 — 수행료는 자전거와 같다).
 enum Vehicle { motorcycle, bicycle, eBike, kickboard, car, walk }
 
 /// 약관 한 줄. 본문은 약관 확정 뒤 서버·문서에서 받는다(지금은 제목만).
@@ -108,6 +110,18 @@ String _compact(String s) => s.replaceAll(RegExp(r'\s'), '');
 bool holderMatchesName(String holder, String name) =>
     _compact(holder).isNotEmpty && _compact(holder) == _compact(name);
 
+/// 이름: 완성된 한글 글자(가~힣) 또는 영문, 2글자 이상. 자음·모음만 친 것(ㄱ·ㅏ 등)은 받지 않는다
+/// (사용자 요청 2026-11-17). 띄어쓰기는 영문 이름 사이에만 허용.
+final _namePattern = RegExp(r'^(?:[가-힣]+|[A-Za-z]+(?: [A-Za-z]+)*)$');
+
+bool nameValid(String name) {
+  final n = name.trim();
+  return n.length >= 2 && _namePattern.hasMatch(n);
+}
+
+/// 자음·모음 낱자가 들어 있는지(한글 호환 자모·자모 블록).
+bool hasLooseJamo(String s) => RegExp(r'[ᄀ-ᇿ㄰-㆏ꥠ-꥿ힰ-퟿]').hasMatch(s);
+
 /// 운전면허가 필요한 수단(사용자 결정 2026-11-16: 오토바이·자동차·킥보드는 필수).
 /// 자전거·전기자전거·도보는 선택 — 넣었으면 중복 확인까지 해야 한다.
 bool licenseRequired(Vehicle? v) =>
@@ -138,13 +152,13 @@ abstract final class SignupOptions {
     '토스뱅크',
   ];
 
-  /// 권역별 지점(충청·강원 9 / 경상·전라 17).
+  /// 권역별 지점(충청 7 · 강원 2 · 전라 4 · 경상 13). 이름순 — 같은 도시(대구·부산…)끼리 모인다.
   static Map<MfcRegion, List<AreaOption>> get areas => {
     for (final r in MfcRegion.values)
       r: [
         for (final b in mfcBranches.where((b) => b.region == r))
           AreaOption(region: r, mfcId: b.id, name: b.name),
-      ],
+      ]..sort((a, b) => a.name.compareTo(b.name)),
   };
 }
 
@@ -152,12 +166,20 @@ abstract final class SignupOptions {
 abstract interface class SignupRepository {
   Future<void> submit(SignupDraft draft);
 
-  /// 운전면허 중복 확인. true 면 쓸 수 있다(다른 라이더가 등록하지 않음).
-  /// 계약에 없다(2026-11-13 면허 칸을 뺐음) — 백엔드 요청 중, 목에서만.
+  /// 운전면허 중복 확인(`POST /riders/license-checks`). true 면 쓸 수 있다.
   Future<bool> isLicenseAvailable(String licenseNumber);
+
+  /// 휴대폰 번호 중복 확인("인증하기" — 본인인증이 아니라 중복만, 사용자 결정 2026-11-10).
+  /// true 면 쓸 수 있다. null = 가입 전 확인 API 가 없다(실서버) — 가입 때 서버가 409 DUPLICATE_RIDER 로 거절한다.
+  /// 백엔드 요청 중(handoff rider-app/2026-11-16-backend-trip-info-and-signup.md §14).
+  Future<bool?> isPhoneAvailable(String phone);
+
+  /// 정산 계좌 중복 확인("인증하기" — 실명·1원 인증이 아니라 다른 라이더가 등록했는지만).
+  /// true 면 쓸 수 있다. null = 확인 API 가 없다(실서버) — 백엔드 요청 중(handoff §15).
+  Future<bool?> isAccountAvailable(String bankName, String accountNumber);
 }
 
-/// 목 구현. 실서버 연결(`POST /riders/signups`)은 라이더 로그인 연동과 함께 붙인다.
+/// 목 구현(휴대폰·계좌 중복도 흉내 낸다).
 final class MockSignupRepository implements SignupRepository {
   MockSignupRepository({this.latency = const Duration(milliseconds: 400)});
 
@@ -171,6 +193,10 @@ final class MockSignupRepository implements SignupRepository {
   Future<void> submit(SignupDraft draft) async {
     await Future<void>.delayed(latency);
     submitted = draft;
+    registeredPhones.add(draft.phone);
+    if (draft.bankName != null && draft.accountNumber.isNotEmpty) {
+      registeredAccounts.add('${draft.bankName}|${draft.accountNumber}');
+    }
     if (draft.licenseNumber.isNotEmpty) {
       registeredLicenses.add(normalizeLicense(draft.licenseNumber));
     }
@@ -181,8 +207,123 @@ final class MockSignupRepository implements SignupRepository {
     await Future<void>.delayed(latency);
     return !registeredLicenses.contains(normalizeLicense(licenseNumber));
   }
+
+  /// 이미 가입한 휴대폰 번호(시연용 가짜 번호).
+  final registeredPhones = <String>{'01011112222'};
+
+  @override
+  Future<bool?> isPhoneAvailable(String phone) async {
+    await Future<void>.delayed(latency);
+    return !registeredPhones.contains(phone);
+  }
+
+  /// 이미 다른 라이더가 등록한 계좌(시연용 가짜 — 은행|번호).
+  final registeredAccounts = <String>{'국민은행|1111222233'};
+
+  @override
+  Future<bool?> isAccountAvailable(
+    String bankName,
+    String accountNumber,
+  ) async {
+    await Future<void>.delayed(latency);
+    return !registeredAccounts.contains('$bankName|$accountNumber');
+  }
 }
 
+/// 실서버 가입(rider-service). 라이더 토큰(Google 로그인)이 있어야 부를 수 있다.
+///
+/// - 같은 가입은 같은 멱등 키로 다시 보낸다(성공하면 새 키).
+/// - 은행: 계약 `bankCode` 형식이 정해지지 않아 은행 이름을 그대로 보낸다 — 백엔드에 물음(handoff §16).
+/// - 배달 지역 `mfcId` 는 서버 지점 목록(`GET /mfc-pickup-points`)의 CenterId 여야 한다 — 그 목록은
+///   생성 클라이언트에 아직 없다(center-master 생성은 PC 1, handoff §16). 지금은 앱의 26개 지점 코드.
+final class ApiSignupRepository implements SignupRepository {
+  ApiSignupRepository(Dio dio)
+    : _signup = rd.PmartApiRider(dio: dio).getSignupApi();
+
+  final rd.SignupApi _signup;
+  IdempotencyKey? _key;
+
+  @override
+  Future<void> submit(SignupDraft draft) async {
+    final key = _key ??= IdempotencyKey.generate();
+    final vehicle = draft.vehicle;
+    final area = draft.area;
+    if (vehicle == null || area == null) {
+      throw const ContractViolationFailure('가입 입력이 끝나지 않았다');
+    }
+    await pmartGuard(
+      () => _signup.createRiderSignup(
+        idempotencyKey: key.value,
+        xSourceSystem: sourceSystem,
+        riderSignupRequest: rd.RiderSignupRequest(
+          phone: draft.phone,
+          name: draft.name.trim(),
+          vehicleType: vehicleToContract(vehicle),
+          licenseNumber: draft.licenseNumber.trim().isEmpty
+              ? null
+              : draft.licenseNumber.trim(),
+          bankAccount: draft.bankName == null || draft.accountNumber.isEmpty
+              ? null
+              : rd.RiderSignupRequestBankAccount(
+                  bankCode: draft.bankName!,
+                  accountNumber: draft.accountNumber,
+                  holderName: draft.holderName.trim(),
+                ),
+          residence: rd.RiderSignupRequestResidence(
+            roadAddress: draft.roadAddress,
+            detail: draft.addressDetail.trim(),
+          ),
+          deliveryAreas: [
+            rd.RiderSignupRequestDeliveryAreasInner(mfcId: area.mfcId),
+          ],
+          consents: [
+            for (final c in draft.consents)
+              rd.RiderSignupRequestConsentsInner(consentType: c),
+          ],
+        ),
+        extra: commandOptions(key).extra,
+      ),
+    );
+    _key = null;
+  }
+
+  @override
+  Future<bool> isLicenseAvailable(String licenseNumber) async {
+    final res = await pmartGuard(
+      () => _signup.checkRiderLicense(
+        checkRiderLicenseRequest: rd.CheckRiderLicenseRequest(
+          licenseNumber: licenseNumber.trim(),
+        ),
+      ),
+    );
+    return res.data?.available ??
+        (throw const ContractViolationFailure('license-checks 본문 없음'));
+  }
+
+  /// 가입 전 확인 API 가 없다 — 가입 때 서버가 확인한다.
+  @override
+  Future<bool?> isPhoneAvailable(String phone) async => null;
+
+  /// 확인 API 가 없다.
+  @override
+  Future<bool?> isAccountAvailable(
+    String bankName,
+    String accountNumber,
+  ) async => null;
+}
+
+rd.VehicleType vehicleToContract(Vehicle v) => switch (v) {
+  Vehicle.motorcycle => rd.VehicleType.MOTORCYCLE,
+  Vehicle.bicycle => rd.VehicleType.BICYCLE,
+  Vehicle.eBike => rd.VehicleType.E_BIKE,
+  Vehicle.kickboard => rd.VehicleType.KICKBOARD,
+  Vehicle.car => rd.VehicleType.CAR,
+  Vehicle.walk => rd.VehicleType.WALK,
+};
+
 final signupRepositoryProvider = Provider<SignupRepository>(
-  (_) => MockSignupRepository(),
+  (ref) => switch (ref.watch(envProvider)) {
+    PmartEnv.mock => MockSignupRepository(),
+    PmartEnv.local => ApiSignupRepository(ref.watch(dioProvider)),
+  },
 );

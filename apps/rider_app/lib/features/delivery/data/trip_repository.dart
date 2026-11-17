@@ -1,4 +1,9 @@
+import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:pmart_api_delivery_dispatch/pmart_api_delivery_dispatch.dart'
+    as dp;
+import 'package:pmart_api_delivery_execution/pmart_api_delivery_execution.dart'
+    as ex;
 import 'package:pmart_core/pmart_core.dart';
 
 import '../../../shared/mfc_directory.dart';
@@ -6,17 +11,122 @@ import '../../../shared/providers.dart';
 import '../domain/delivery.dart';
 import '../domain/trip.dart';
 
-/// 배송의 주문·픽업지 요약. 계약에 없어(백엔드 요청 중) 실서버 구현은 늘 null 이다.
+/// 배송의 주문·픽업지 요약.
 abstract interface class TripRepository {
   Future<TripInfo?> forDelivery(String deliveryId);
 }
 
-/// 실서버: 계약에 주문 요약·가게 정보가 없다 — 추측해 부르지 않는다.
+/// 제안에서 받은 요약(배송 ID 별). 수락 뒤 배송 조회에는 좌표·소요가 없어 제안 때 값을 이어 쓴다.
+final _offerTrips = <String, TripInfo>{};
+
+/// 제안 요약(dispatch 0.4.5~ `summary.order`·`dropEtaSeconds`·`pickupPoint`·`dropAreaPoint`) →
+/// 화면 요약. 예정 시각은 서버 값이 없어 "지금 + 소요"로 잡는다(백엔드 회신 2026-11-16 §3 — 수락
+/// 시각 + pickupEtaSeconds / + dropEtaSeconds). 제안이 보일 때마다 새로 적으므로 수락 직전 값이 남는다.
+void rememberOfferTrip(String deliveryId, dp.OfferSummary s, {DateTime? now}) {
+  final at = now ?? DateTime.now();
+  final order = s.order;
+  if ((s.mfcId, order?.mfcName) case (final id?, final name?)) {
+    serverStoreNames[id] = name;
+  }
+  final pickupDue = s.pickupEtaSeconds == null
+      ? null
+      : at.add(Duration(seconds: s.pickupEtaSeconds!));
+  final dropDue = pickupDue == null || s.dropEtaSeconds == null
+      ? null
+      : pickupDue.add(Duration(seconds: s.dropEtaSeconds!));
+  _offerTrips[deliveryId] = TripInfo(
+    orderNo: order?.orderNumber ?? order?.orderId ?? '',
+    store: _serverStore(
+      s.mfcId,
+      name: order?.mfcName,
+      address: order?.mfcAddress,
+      point: s.pickupPoint,
+    ),
+    items: [
+      for (final i in order?.items ?? const <dp.OfferOrderInfoItemsInner>[])
+        OrderLine(
+          name: [?i.name, ?i.optionLabel].join(' '),
+          qty: i.qty ?? 0,
+          amount: i.lineAmount ?? 0,
+        ),
+    ],
+    menuTotal: order?.itemAmount,
+    deliveryRequest: order?.deliveryNote,
+    dropLabel: s.dropAreaLabel,
+    drop: switch (s.dropAreaPoint) {
+      final p? => (lat: p.lat, lng: p.lng),
+      null => null,
+    },
+    pickupDueAt: pickupDue,
+    dropDueAt: dropDue,
+    dropEtaSeconds: s.dropEtaSeconds,
+  );
+}
+
+/// 서버 값으로 만든 픽업지. 가게 전화는 서버에 아직 없다(null). 좌표가 없으면 앱 지점표 좌표.
+MfcBranch _serverStore(
+  String? mfcId, {
+  String? name,
+  String? address,
+  dp.LatLng? point,
+}) {
+  final known = mfcById(mfcId);
+  return MfcBranch(
+    id: mfcId ?? '',
+    name: name ?? known?.name ?? '',
+    region: known?.region ?? MfcRegion.gyeongsang,
+    address: address ?? known?.address ?? '',
+    lat: point?.lat ?? known?.lat ?? 0,
+    lng: point?.lng ?? known?.lng ?? 0,
+  );
+}
+
+/// 실서버: 배송 조회의 주문 요약(execution `orderSummary`) + 제안 때 받은 좌표·소요.
+/// 배정 전(제안만 있는 배송)은 배송 조회가 안 되므로 제안 요약만 쓴다.
 final class ApiTripRepository implements TripRepository {
-  const ApiTripRepository();
+  ApiTripRepository(Dio dio)
+    : _exec = ex.PmartApiDeliveryExecution(dio: dio).getExecutionApi();
+
+  final ex.ExecutionApi _exec;
 
   @override
-  Future<TripInfo?> forDelivery(String deliveryId) async => null;
+  Future<TripInfo?> forDelivery(String deliveryId) async {
+    final hint = _offerTrips[deliveryId];
+    ex.DeliveryExecution? d;
+    try {
+      d = (await pmartGuard(
+        () => _exec.getDeliveryExecution(deliveryId: deliveryId),
+      )).data;
+    } on PmartFailure {
+      if (hint == null) rethrow;
+    }
+    final summary = d?.orderSummary;
+    if (summary == null) return hint;
+    final items = [
+      for (final i
+          in summary.items ??
+              const <ex.DeliveryExecutionOrderSummaryItemsInner>[])
+        OrderLine(
+          name: [?i.name, ?i.optionLabel].join(' '),
+          qty: i.qty ?? 0,
+          amount: i.lineAmount ?? 0,
+        ),
+    ];
+    return TripInfo(
+      orderNo:
+          summary.orderNumber ??
+          (hint?.orderNo.isNotEmpty == true ? hint!.orderNo : d?.orderId ?? ''),
+      store: hint?.store ?? _serverStore(d?.mfcId),
+      items: items.isEmpty ? hint?.items ?? const [] : items,
+      menuTotal: summary.itemAmount ?? hint?.menuTotal,
+      deliveryRequest: summary.deliveryNote ?? hint?.deliveryRequest,
+      dropLabel: hint?.dropLabel,
+      drop: hint?.drop,
+      pickupDueAt: hint?.pickupDueAt,
+      dropDueAt: hint?.dropDueAt,
+      dropEtaSeconds: hint?.dropEtaSeconds,
+    );
+  }
 }
 
 /// 목 주문(부산진구지점). 이름·전화·주소는 모두 가짜다.
@@ -155,11 +265,11 @@ DropInfo mockDropInfo(String deliveryId) {
 final tripRepositoryProvider = Provider<TripRepository>(
   (ref) => switch (ref.watch(envProvider)) {
     PmartEnv.mock => MockTripRepository(),
-    PmartEnv.local => const ApiTripRepository(),
+    PmartEnv.local => ApiTripRepository(ref.watch(dioProvider)),
   },
 );
 
-/// 배송의 주문 요약. 계약에 없어 실서버에서는 null.
+/// 배송의 주문 요약(서버 값이 없으면 null — 화면은 계약에 있는 값만).
 final tripInfoProvider = FutureProvider.autoDispose.family<TripInfo?, String>(
   (ref, id) => ref.watch(tripRepositoryProvider).forDelivery(id),
 );

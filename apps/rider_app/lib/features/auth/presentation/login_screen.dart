@@ -7,6 +7,14 @@ import '../../../shared/rider_style.dart';
 import '../../../shared/rider_widgets.dart';
 import '../data/session.dart';
 
+/// 로그인 결과 안내(로그인됨·취소는 안내 없음).
+String? loginResultText(AppLocalizations l10n, LoginResult r) => switch (r) {
+  LoginResult.loggedIn || LoginResult.canceled => null,
+  LoginResult.misconfigured => l10n.loginMisconfigured,
+  LoginResult.rejected => l10n.loginRejected,
+  LoginResult.unavailable => l10n.loginUnavailable,
+};
+
 /// 로그인. 라이더 인증은 Google 로그인 하나다(백엔드 ADR-0054·0055) — 레퍼런스의 아이디·비밀번호 칸은 두지 않는다.
 class LoginScreen extends ConsumerStatefulWidget {
   const LoginScreen({super.key});
@@ -24,8 +32,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     final result = await ref.read(sessionProvider.notifier).loginWithGoogle();
     if (!mounted) return;
     setState(() => _busy = false);
-    if (result == LoginResult.notConnected) {
-      showRiderToast(context, l10n.loginNotConnected);
+    if (loginResultText(l10n, result) case final text?) {
+      showRiderToast(context, text);
     }
   }
 

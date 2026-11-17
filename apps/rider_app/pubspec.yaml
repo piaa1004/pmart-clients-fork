@@ -28,6 +28,16 @@ dependencies:
     path: ../../packages/pmart_api/gen/delivery-dispatch
   pmart_api_rider:
     path: ../../packages/pmart_api/gen/rider
+  pmart_api_rider_auth:
+    path: ../../packages/pmart_api/gen/rider-auth
+  pmart_api_center_master:
+    path: ../../packages/pmart_api/gen/center-master
+  pmart_api_case:
+    path: ../../packages/pmart_api/gen/case
+  pmart_api_notification:
+    path: ../../packages/pmart_api/gen/notification
+  # 라이더 Google 로그인(rider-auth). 고객앱과 같은 버전.
+  google_sign_in: ^7.2.0
   pmart_api_delivery_execution:
     path: ../../packages/pmart_api/gen/delivery-execution
   pmart_api_mfc_fulfillment:
@@ -49,3 +59,6 @@ dev_dependencies:
 flutter:
   uses-material-design: true
   generate: true
+  # 라이더 약관 5종 본문(docs/PMart_라이더앱_약관_5종.md 에서 나눔).
+  assets:
+    - assets/terms/

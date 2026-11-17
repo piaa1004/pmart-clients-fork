@@ -140,9 +140,15 @@ void main() {
     expect(find.byKey(const ValueKey('delivery-dlv-1')), findsNothing);
   });
 
-  testWidgets('일반 배차 모드에는 거절 버튼이 없다', (t) async {
+  testWidgets('일반 배차 모드는 홈에 AI 제안이 뜨지 않고 배달리스트로 안내한다', (t) async {
+    repo = MockOfferRepository(
+      latency: Duration.zero,
+      mode: DispatchMode.normal,
+    );
     await start(t);
+    expect(find.byKey(const ValueKey('accept-offer-mock-1')), findsNothing);
     expect(find.byKey(const ValueKey('reject-offer-mock-1')), findsNothing);
+    expect(find.byKey(const ValueKey('normal-mode-notice')), findsOneWidget);
   });
 
   testWidgets('진행 중 배송이 있으면 운행을 끝낼 수 없다(서버 판정)', (t) async {
@@ -313,18 +319,50 @@ void main() {
     }
     await t.pump();
     await tap('signup-next');
+    // 휴대폰 번호는 "인증하기"(중복 확인)를 통과해야 다음으로 간다.
+    bool canNext() =>
+        t
+            .widget<RiderButton>(find.byKey(const ValueKey('signup-next')))
+            .onPressed !=
+        null;
+    // 이름은 자음·모음만으로는 안 된다(완성된 글자로).
+    await t.enterText(find.byKey(const ValueKey('signup-name')), 'ㅎㄱㄷ');
+    await t.pump();
+    expect(find.text('이름을 다시 확인해주세요'), findsOneWidget);
+    await t.enterText(find.byKey(const ValueKey('signup-name')), '홍길동');
+    await t.pump();
+    expect(find.text('이름을 다시 확인해주세요'), findsNothing);
+    await t.enterText(
+      find.byKey(const ValueKey('signup-phone')),
+      '01011112222', // 이미 가입된 번호(목)
+    );
+    await t.pump();
+    expect(canNext(), isFalse, reason: '인증 전');
+    await tap('phone-check');
+    expect(find.text('이미 가입된 번호예요. 다른 번호를 입력해 주세요'), findsOneWidget);
+    expect(canNext(), isFalse);
     await t.enterText(
       find.byKey(const ValueKey('signup-phone')),
       '01012345678',
     );
-    await t.enterText(find.byKey(const ValueKey('signup-name')), '홍길동');
     await t.pump();
+    expect(
+      find.text('인증하기를 눌러 가입할 수 있는 번호인지 확인해 주세요'),
+      findsOneWidget,
+      reason: '번호를 바꾸면 다시 인증',
+    );
+    await tap('phone-check');
+    expect(find.text('가입할 수 있는 번호예요'), findsOneWidget);
+    expect(canNext(), isTrue);
     await tap('signup-next');
 
     // 예금주가 본인 이름과 다르면 넘어갈 수 없다.
     await tap('signup-bank');
     await tap('bank-국민은행');
-    await t.enterText(find.byKey(const ValueKey('signup-account')), '123456');
+    await t.enterText(
+      find.byKey(const ValueKey('signup-account')),
+      '1111222233', // 이미 등록된 계좌(목)
+    );
     await t.enterText(find.byKey(const ValueKey('signup-holder')), '김다른');
     await t.pump();
     final next = find.byKey(const ValueKey('signup-next'));
@@ -332,6 +370,23 @@ void main() {
     expect(find.text('예금주가 가입자 이름과 같아야 해요'), findsOneWidget);
     await t.enterText(find.byKey(const ValueKey('signup-holder')), '홍 길동');
     await t.pump();
+    // 계좌도 "인증하기"(중복 확인)를 통과해야 한다.
+    expect(t.widget<RiderButton>(next).onPressed, isNull, reason: '계좌 인증 전');
+    await tap('account-check');
+    expect(find.text('이미 등록된 계좌예요. 다른 계좌를 입력해 주세요'), findsOneWidget);
+    expect(t.widget<RiderButton>(next).onPressed, isNull);
+    await t.enterText(
+      find.byKey(const ValueKey('signup-account')),
+      '1234567890',
+    );
+    await t.pump();
+    expect(
+      find.text('인증하기를 눌러 등록할 수 있는 계좌인지 확인해 주세요'),
+      findsOneWidget,
+      reason: '번호를 바꾸면 다시 인증',
+    );
+    await tap('account-check');
+    expect(find.text('등록할 수 있는 계좌예요'), findsOneWidget);
     expect(t.widget<RiderButton>(next).onPressed, isNotNull);
     await tap('signup-next');
 
@@ -346,7 +401,7 @@ void main() {
     await tap('signup-road');
     expect(find.text('부산 부산진구 동천로 109'), findsOneWidget);
     await tap('signup-area');
-    await tap('area-gyeongsangJeolla');
+    await tap('area-gyeongsang');
     await tap('area-confirm');
     await tap('area-부산진구지점');
     await tap('area-confirm');
@@ -373,6 +428,14 @@ void main() {
     await t.pump();
     await tap('license-check');
     expect(find.text('등록할 수 있는 면허예요'), findsOneWidget);
+    // 배달료를 확인하고 동의해야 완료(레퍼런스 image 41).
+    expect(t.widget<RiderButton>(next).onPressed, isNull);
+    await t.ensureVisible(find.byKey(const ValueKey('fee-guide')));
+    await tap('fee-guide');
+    expect(find.byKey(const ValueKey('fee-guide-screen')), findsOneWidget);
+    expect(find.textContaining('2,600'), findsWidgets);
+    await tap('fee-agree');
+    expect(t.widget<RiderButton>(next).onPressed, isNotNull);
     await tap('signup-next');
 
     expect(signups.submitted?.phone, '01012345678');

@@ -269,6 +269,16 @@ enum HelpState { open, inProgress, resolved, unknown }
 /// 상담원 처리 메모는 계약상 직원에게만 보여 라이더 앱은 받지 않는다.
 typedef HelpStatusView = ({HelpState state, String? caseId});
 
+/// 내가 보낸 도움요청 한 건(목록 조회).
+typedef HelpRecord = ({
+  String requestId,
+  HelpCategory category,
+  String? detail,
+  DateTime sentAt,
+  HelpState state,
+  String? caseId,
+});
+
 /// 지원센터 대화에서 말한 쪽.
 enum SupportSender { rider, agent }
 
@@ -280,15 +290,19 @@ class SupportMessage {
     required this.sender,
     required this.text,
     required this.at,
+    this.masked = false,
   });
 
   final String id;
   final SupportSender sender;
   final String text;
   final DateTime at;
+
+  /// 지원센터가 가린 메시지(개인정보 등 — 본문 없음).
+  final bool masked;
 }
 
-/// 라이더용 상담 대화 API 가 없어 쓸 수 없다(실서버).
+/// 상담 대화를 쓸 수 없다(대화 API 를 부를 수 없는 환경).
 final class SupportThreadUnavailable implements Exception {
   const SupportThreadUnavailable();
 }

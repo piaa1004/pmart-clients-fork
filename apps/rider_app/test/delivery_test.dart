@@ -211,13 +211,79 @@ void main() {
     }
 
     await settle();
+    // 다른 제안이 와 있으면 제안 카드 위 '진행 중 배송' 한 줄을 눌러 들어간다.
     await t.tap(find.byKey(const ValueKey('delivery-dlv-1')));
     await settle();
     expect(find.text('픽업지로 이동해주세요'), findsOneWidget);
 
+    // 기본 화면(레퍼런스 image 14): 예정·장소·도움요청|길찾기만. 배달 정보·진행 버튼은 펼쳐야 보인다.
+    final screenBottom = t.view.physicalSize.height / t.view.devicePixelRatio;
+    expect(find.byKey(const ValueKey('help')).hitTestable(), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('navigate')).hitTestable(),
+      findsOneWidget,
+    );
+    expect(find.byKey(const ValueKey('arrive-store')), findsNothing);
+    expect(
+      t.getTopLeft(find.byKey(const ValueKey('mart-info'))).dy,
+      greaterThanOrEqualTo(screenBottom - 1),
+    );
+
+    // 아래 시트: 회색바를 누르면 펼쳐지고(배달 정보), 다시 누르면 접힌다.
+    final peek = t.getTopLeft(find.byKey(const ValueKey('sheet-handle'))).dy;
+    expect(find.text('누르거나 위로 올려 배달 정보 보기'), findsOneWidget);
+    await t.tap(find.byKey(const ValueKey('sheet-handle')));
+    await t.pump();
+    await t.pump(const Duration(milliseconds: 400)); // 펼치는 애니메이션
+    final opened = t.getTopLeft(find.byKey(const ValueKey('sheet-handle'))).dy;
+    expect(opened, lessThan(peek - 100));
+    expect(find.text('눌러서 지도 보기'), findsOneWidget);
+    // 펼치면 배달 정보와 진행 버튼(가게 도착)이 보인다.
+    expect(
+      t.getTopLeft(find.byKey(const ValueKey('mart-info'))).dy,
+      lessThan(screenBottom - 100),
+    );
+    expect(find.byKey(const ValueKey('arrive-store')), findsOneWidget);
+    await t.tap(find.byKey(const ValueKey('sheet-handle')));
+    await t.pump();
+    await t.pump(const Duration(milliseconds: 400)); // 접히는 애니메이션
+    expect(
+      t.getTopLeft(find.byKey(const ValueKey('sheet-handle'))).dy,
+      closeTo(peek, 1),
+    );
+    // 위로 끌어 올리면 올린 만큼 펼쳐지고 그대로 머문다(되돌아가지 않는다).
+    await t.drag(
+      find.byKey(const ValueKey('sheet-handle')),
+      const Offset(0, -300),
+    );
+    await settle();
+    final dragged = t.getTopLeft(find.byKey(const ValueKey('sheet-handle'))).dy;
+    expect(dragged, lessThan(peek - 200));
+    // 끝까지 올리면 "눌러서 지도 보기".
+    await t.drag(
+      find.byKey(const ValueKey('sheet-handle')),
+      const Offset(0, -800),
+    );
+    await settle();
+    expect(find.text('눌러서 지도 보기'), findsOneWidget);
+    await t.tap(find.byKey(const ValueKey('sheet-handle')));
+    await t.pump();
+    await t.pump(const Duration(milliseconds: 400));
+    expect(
+      t.getTopLeft(find.byKey(const ValueKey('sheet-handle'))).dy,
+      closeTo(peek, 1),
+    );
+    expect(find.byKey(const ValueKey('arrive-store')), findsNothing);
+
+    // 펼쳐서 진행한다(이 화면에 있는 동안 펼친 채로 둔다).
+    await t.tap(find.byKey(const ValueKey('sheet-handle')));
+    await t.pump();
+    await t.pump(const Duration(milliseconds: 400));
     await t.tap(find.byKey(const ValueKey('arrive-store')));
     await settle();
-    expect(find.text('포장 인계 0 / 2'), findsOneWidget);
+    // 가게 도착 뒤 배송 화면에는 포장 인계 상자(0 / 2·포장별 QR)를 두지 않는다 — QR 픽업 화면에서 본다.
+    expect(find.byKey(const ValueKey('handover-progress')), findsNothing);
+    expect(find.byKey(const ValueKey('pkg-pkg-1')), findsNothing);
 
     // 주문정보: 8자리 주문번호 · 한글 지점명 · 품목 · 요청사항. 거절 코드·전송확인 버튼은 없다.
     expect(find.byKey(const ValueKey('order-info')), findsOneWidget);
@@ -337,6 +403,7 @@ void main() {
     }
 
     await settle();
+    // 다른 제안이 와 있으면 제안 카드 위 '진행 중 배송' 한 줄을 눌러 들어간다.
     await t.tap(find.byKey(const ValueKey('delivery-dlv-1')));
     await settle();
     // 배차취소는 도움요청 메뉴 안에 있다.

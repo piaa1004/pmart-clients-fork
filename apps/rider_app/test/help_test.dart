@@ -98,7 +98,11 @@ void main() {
     }
 
     await settle();
+    // 다른 제안이 와 있으면 제안 카드 위 '진행 중 배송' 한 줄을 눌러 들어간다.
     await t.tap(find.byKey(const ValueKey('delivery-dlv-1')));
+    await settle();
+    // 아래 시트를 펼쳐야 "'여기에 두었어요' 알리기"가 보인다(레퍼런스 image 17).
+    await t.tap(find.byKey(const ValueKey('sheet-handle')));
     await settle();
     await t.tap(find.byKey(const ValueKey('photo')));
     await settle();
@@ -233,6 +237,7 @@ void main() {
     }
 
     await settle();
+    // 다른 제안이 와 있으면 제안 카드 위 '진행 중 배송' 한 줄을 눌러 들어간다.
     await t.tap(find.byKey(const ValueKey('delivery-dlv-1')));
     await settle();
     // 전달 단계 화면에는 "전달할 수 없어요" 버튼이 따로 없다 — 도움요청 메뉴 안에 있다.
@@ -260,9 +265,74 @@ void main() {
     await settle();
 
     expect(repo.deliveryJson('dlv-1')['state'], 'FAILURE_REPORTED');
+    // 알리면 같은 내용으로 지원센터 대화가 열리고 대화 화면으로 바로 간다(도움요청을 다시 쓰지 않는다).
+    expect(find.byKey(const ValueKey('thread-messages')), findsOneWidget);
+    expect(find.text('전달 불가를 알렸어요 · 사유: 고객 부재'), findsOneWidget);
+    expect(find.byKey(const ValueKey('thread-input')), findsOneWidget);
+    expect(repo.helpDetails.values, contains('전달 불가를 알렸어요 · 사유: 고객 부재'));
+
+    // 대화에서 나오면 배송 화면: 운영자 확인 대기 + "지원센터와 대화하기"로 다시 들어간다.
+    await t.tap(find.byType(BackButton));
+    await settle();
     expect(find.byKey(const ValueKey('failure-waiting')), findsOneWidget);
+    await t.tap(find.byKey(const ValueKey('failure-talk')));
+    await settle();
+    expect(find.byKey(const ValueKey('thread-messages')), findsOneWidget);
     // 로그인 화면으로 가지 않는다.
     expect(find.byKey(const ValueKey('login-apply')), findsNothing);
+    await t.tap(find.byType(BackButton));
+    await settle();
+
+    // 그 뒤 고객에게 연락이 와서 전달할 수 있게 됐다 → "고객과 연락됐어요" → 대화에 알린다.
+    // 라이더가 직접 취소하지 않는다 — 운영자가 반려하면 원래 단계로 돌아온다.
+    await t.tap(find.byKey(const ValueKey('failure-resume')));
+    await settle();
+    expect(find.byKey(const ValueKey('thread-messages')), findsOneWidget);
+    expect(find.textContaining('고객과 다시 연락이 됐어요'), findsOneWidget);
+
+    // 상담원 배정·답장(목) → 반려.
+    now = now.add(
+      MockDeliveryRepository.assignAfter + MockDeliveryRepository.replyAfter,
+    );
+    await t.pump(const Duration(seconds: 4));
+    await settle();
+    expect(find.textContaining('전달 불가를 반려했으니'), findsOneWidget);
+    expect(repo.deliveryJson('dlv-1')['state'], 'PICKED_UP');
+
+    // 배송 화면은 확인해서 전달 단계로 돌아온다.
+    await t.tap(find.byType(BackButton));
+    await t.pump(const Duration(seconds: 8));
+    await settle();
+    expect(find.byKey(const ValueKey('failure-waiting')), findsNothing);
+    expect(find.byKey(const ValueKey('failure-resume')), findsNothing);
+    expect(find.text('전달 불가가 반려됐어요. 고객에게 전달을 계속해 주세요'), findsOneWidget);
+  });
+
+  test('앱을 다시 켜도 보낸 도움요청을 서버 목록에서 되찾는다', () async {
+    final first = ProviderContainer(
+      retry: (_, _) => null,
+      overrides: overrides(),
+    );
+    first.listen(helpFlowProvider('dlv-1'), (_, _) {});
+    await first
+        .read(helpFlowProvider('dlv-1').notifier)
+        .send(HelpCategory.storeWaiting, detail: '포장이 늦어요');
+    final key = first.read(helpFlowProvider('dlv-1')).key!.value;
+    first.dispose(); // 앱 종료
+
+    final again = ProviderContainer(
+      retry: (_, _) => null,
+      overrides: overrides(),
+    );
+    addTearDown(again.dispose);
+    final p = helpFlowProvider('dlv-1');
+    again.listen(p, (_, _) {});
+    expect(again.read(p).tickets, isEmpty);
+    await again.read(p.notifier).refresh();
+    final t = again.read(p).tickets.single;
+    expect(t.key.value, key);
+    expect(t.category, HelpCategory.storeWaiting);
+    expect(t.detail, '포장이 늦어요');
   });
 
   test('처리된 도움요청 뒤 새 도움요청은 새 키로 보낸다', () async {

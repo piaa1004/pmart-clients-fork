@@ -126,12 +126,18 @@ void main() {
       await t.tap(find.byKey(ValueKey('consent-${c.type}')));
     }
     await shot('signup-1-terms');
+    await tap('terms-PRIVACY_THIRD_PARTY');
+    await shot('terms-third-party');
+    router().pop();
+    await settle();
     await tap('signup-next');
     await t.enterText(
       find.byKey(const ValueKey('signup-phone')),
       '01012345678',
     );
     await t.enterText(find.byKey(const ValueKey('signup-name')), '홍길동');
+    await settle();
+    await tap('phone-check');
     await shot('signup-2-phone');
     await tap('signup-next');
     await tap('signup-bank');
@@ -141,6 +147,8 @@ void main() {
       find.byKey(const ValueKey('signup-account')),
       '1234567890',
     );
+    await settle();
+    await tap('account-check');
     await shot('signup-3-bank');
     await tap('signup-next');
     await tap('signup-road'); // 시험 주소 검색(아래 덮어쓰기)
@@ -150,7 +158,7 @@ void main() {
     );
     await shot('signup-4-delivery');
     await tap('signup-area');
-    await tap('area-gyeongsangJeolla');
+    await tap('area-gyeongsang');
     await shot('signup-4-area-city');
     await tap('area-confirm');
     await tap('area-부산진구지점');
@@ -158,7 +166,17 @@ void main() {
     await tap('area-confirm');
     await tap('signup-vehicle');
     await shot('signup-4-vehicle');
-    await tap('vehicle-motorcycle');
+    await tap('vehicle-bicycle'); // 오토바이는 면허 필수라 시연은 자전거
+    await t.scrollUntilVisible(
+      find.byKey(const ValueKey('fee-guide')),
+      200,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await settle();
+    await shot('signup-4-fee-link');
+    await tap('fee-guide');
+    await shot('fee-guide');
+    await tap('fee-agree');
     await shot('signup-4-filled');
     await tap('signup-next');
     await shot('signup-done');
@@ -181,8 +199,10 @@ void main() {
     await shot('delivery-list');
     router().pop();
     await settle();
-    await tap('delivery-dlv-1');
+    // 홈에 배송 시트가 바로 뜬다.
     await shot('delivery-1-to-store');
+    await tap('sheet-handle'); // 펼치면 배달 정보·가게 도착
+    await shot('delivery-1-open');
     await tap('arrive-store');
     await shot('delivery-2-at-store');
     await tap('qr-pickup');
