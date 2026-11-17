@@ -7,6 +7,7 @@ import 'package:pmart_core/pmart_core.dart';
 
 import '../../../shared/providers.dart';
 import '../../delivery/data/mock_delivery_repository.dart';
+import '../../push/push_tokens.dart';
 import 'rider_auth.dart';
 
 @immutable
@@ -108,9 +109,15 @@ class SessionController extends Notifier<RiderSession?> {
   }
 
   void logout() {
-    if (ref.read(envProvider) != PmartEnv.mock) {
-      unawaited(ref.read(riderLoginProvider).logout());
-    }
+    // 토큰을 지우기 전에 이 단말의 푸시 등록을 푼다(다른 라이더 알림이 이 단말로 오지 않게).
+    final unregister = ref.read(pushUnregisterProvider);
+    final real = ref.read(envProvider) != PmartEnv.mock;
+    final login = real ? ref.read(riderLoginProvider) : null;
+    unawaited(() async {
+      // 오래 걸려도 로그아웃(토큰 지우기)을 붙잡지 않는다.
+      await unregister().timeout(const Duration(seconds: 5), onTimeout: () {});
+      await login?.logout();
+    }());
     _set(null);
   }
 

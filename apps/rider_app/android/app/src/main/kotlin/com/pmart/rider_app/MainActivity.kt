@@ -3,8 +3,11 @@ package com.pmart.rider_app
 import android.Manifest
 import android.app.Activity
 import android.content.Intent
+import android.app.NotificationChannel
+import android.app.NotificationManager
 import android.content.pm.PackageManager
 import android.os.Build
+import android.os.Bundle
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -18,6 +21,37 @@ import io.flutter.plugin.common.MethodChannel
 class MainActivity : FlutterActivity() {
     private var pending: MethodChannel.Result? = null
     private var pendingNavi: MethodChannel.Result? = null
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        createPushChannels()
+    }
+
+    /**
+     * 서버 푸시가 쓰는 알림 채널(notification-service `android.notification.channel_id`, 백엔드 회신 2026-11-17).
+     * ID 는 서버가 정했다 — 이름·중요도는 앱이 정한다. 배차 제안만 높음(소리·진동·화면 위 표시).
+     */
+    private fun createPushChannels() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+        val manager = getSystemService(NotificationManager::class.java) ?: return
+        val channels = listOf(
+            NotificationChannel("dispatch_offer", getString(R.string.push_channel_dispatch_offer), NotificationManager.IMPORTANCE_HIGH).apply {
+                description = getString(R.string.push_channel_dispatch_offer_desc)
+                enableVibration(true)
+                vibrationPattern = longArrayOf(0, 400, 200, 400)
+            },
+            NotificationChannel("support", getString(R.string.push_channel_support), NotificationManager.IMPORTANCE_DEFAULT).apply {
+                description = getString(R.string.push_channel_support_desc)
+            },
+            NotificationChannel("account", getString(R.string.push_channel_account), NotificationManager.IMPORTANCE_DEFAULT).apply {
+                description = getString(R.string.push_channel_account_desc)
+            },
+            NotificationChannel("settlement", getString(R.string.push_channel_settlement), NotificationManager.IMPORTANCE_DEFAULT).apply {
+                description = getString(R.string.push_channel_settlement_desc)
+            },
+        )
+        manager.createNotificationChannels(channels)
+    }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)

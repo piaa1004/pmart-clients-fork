@@ -1,3 +1,5 @@
+import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -8,9 +10,52 @@ import 'package:pmart_ui/pmart_ui.dart';
 import 'app.dart';
 import 'features/auth/data/rider_auth.dart' show riderRefresher;
 import 'features/auth/data/session.dart';
+import 'features/push/push_messages.dart';
+import 'features/push/push_tokens.dart';
 import 'shared/providers.dart';
 import 'shared/kakao_navi.dart';
 import 'shared/rider_map.dart' show kakaoNativeAppKey;
+
+/// FCM 등록 토큰(firebase_messaging). 토큰 값은 로그에 남기지 않는다.
+///
+/// 계약(notification 0.3.0 PushTokenRegistration.token)이 "FCM 등록 토큰"이라 getToken·onTokenRefresh 를 쓴다.
+/// firebase_messaging 17 은 이를 deprecated 로 두고 register()/onRegistered(설치 ID, 직접 발송 대상)를 권한다 —
+/// 서버 발송 방식이 정해지면 바꾼다(백엔드 발송은 아직 없음).
+final class FirebasePushTokenSource implements PushTokenSource {
+  FirebasePushTokenSource(this._fcm);
+
+  final FirebaseMessaging _fcm;
+
+  @override
+  Future<void> requestPermission() => _fcm.requestPermission();
+
+  @override
+  // ignore: deprecated_member_use
+  Future<String?> token() => _fcm.getToken();
+
+  @override
+  // ignore: deprecated_member_use
+  Stream<String> get onTokenRefresh => _fcm.onTokenRefresh;
+
+  static PushMessage _of(RemoteMessage m) => PushMessage.fromData(
+    m.data,
+    title: m.notification?.title,
+    body: m.notification?.body,
+  );
+
+  @override
+  Stream<PushMessage> get onForeground => FirebaseMessaging.onMessage.map(_of);
+
+  @override
+  Stream<PushMessage> get onOpened =>
+      FirebaseMessaging.onMessageOpenedApp.map(_of);
+
+  @override
+  Future<PushMessage?> initialMessage() async {
+    final m = await _fcm.getInitialMessage();
+    return m == null ? null : _of(m);
+  }
+}
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -22,6 +67,14 @@ Future<void> main() async {
     await KakaoMapSdk.instance.initialize(kakaoNativeAppKey);
     initKakaoNavi();
   }
+  // Firebase 메시징(google-services.json 이 있는 빌드). 못 켜면 푸시 없이 간다(알림함은 따로 있다).
+  PushTokenSource push = const NoPushTokenSource();
+  try {
+    await Firebase.initializeApp();
+    push = FirebasePushTokenSource(FirebaseMessaging.instance);
+  } on Object catch (e) {
+    debugPrint('Firebase 초기화 안 됨: ${e.runtimeType}');
+  }
   // 앱이 내려졌다 다시 켜져도(카메라 등) 로그인 상태를 잇는다.
   final saved = await loadSavedSession(FlutterSecureKeyValueStore());
   runApp(
@@ -30,6 +83,7 @@ Future<void> main() async {
       retry: (_, _) => null,
       overrides: [
         initialSessionProvider.overrideWithValue(saved),
+        pushTokenSourceProvider.overrideWithValue(push),
         // 실서버: 라이더 토큰 갱신(rider-auth) · 갱신 거절이면 로그인 화면으로.
         tokenRefresherProvider.overrideWith(
           (ref) => riderRefresher(
