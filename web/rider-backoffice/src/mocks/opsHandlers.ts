@@ -281,7 +281,8 @@ export const opsHandlers = [
   http.get(`${API_BASE}/rider-operating-time`, ({ request }) => {
     const g = guard(request);
     if ('error' in g) return g.error;
-    return HttpResponse.json({ from: '2026-11-16', to: '2026-11-17', totalSeconds: 5400, days: [] });
+    // execution 0.25.0 — 운행시간(수락~완료) totalSeconds 와 따로 접속(connectedSeconds)·대기(waitingSeconds)
+    return HttpResponse.json({ from: '2026-11-16', to: '2026-11-17', totalSeconds: 5400, connectedSeconds: 9000, waitingSeconds: 1800, days: [] });
   }),
 
   http.get(`${API_BASE}/surcharge-requests`, ({ request }) => {
@@ -319,9 +320,13 @@ export const opsHandlers = [
           location: { lat: 35.1585, lng: 129.062, accuracyM: 10, recordedAt: timestamp(), receivedAt: timestamp(), quality: 'GOOD' },
           staleSinceSeconds: 8,
           stale: false,
+          // tracking 0.9.0 — 운행 시작(배송 중이라 대기 아님 → waitingSince null)
+          onDutySince: new Date(Date.now() - 2 * 3600_000).toISOString(),
+          waitingSince: null,
           activeDeliveries: [{ deliveryId: 'DLV-1', stage: 'TO_CUSTOMER', pickedUp: true, etaDrop: null }],
         },
-        { riderId: 'RD-9', vehicleType: 'BICYCLE', newDispatchEnabled: false, restriction: 'NORMAL', location: null, staleSinceSeconds: null, stale: true, activeDeliveries: [] },
+        // 신규배차를 꺼 둔 운행 라이더 — 대기로 세지 않는다(waitingSince null)
+        { riderId: 'RD-9', vehicleType: 'BICYCLE', newDispatchEnabled: false, restriction: 'NORMAL', location: null, staleSinceSeconds: null, stale: true, onDutySince: new Date(Date.now() - 40 * 60_000).toISOString(), waitingSince: null, activeDeliveries: [] },
       ],
     });
   }),

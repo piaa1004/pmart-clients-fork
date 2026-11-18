@@ -2,6 +2,7 @@
 
 - 보낸 앱: rider-backoffice (PC 5)
 - 받는 백엔드 영역: delivery (rider-service 운행 상태, delivery-execution 운행시간, 필요하면 delivery-tracking 관제 응답)
+- **회신·반영(2026-11-18)**: 백엔드 `../pmart-backend/docs/handoff/clients/rider-backoffice/2026-11-18-reply-rider-waiting-time.md`(PR #182 — tracking 0.9.0 `onDutySince`·`waitingSince`, execution 0.25.0 `connectedSeconds`·`waitingSeconds`). 사용자 정의: 대기 = 운행 중 + 신규배차 켬 + 맡은 배송 0건, 운행을 켜 둔 전체는 "접속 시간". `changedAt` 은 신규배차 토글에도 바뀜(쓰지 않음). 같은 PR #123 에 반영 — 끝나면 archive 로.
 - 근거: 사용자 2026-11-18 "주문번호에 해당하는 라이더를 바로 볼 수 있고, 그 라이더의 위치와 전달 상황과 **대기 및 운영 시간**을 바로 볼 수 있게 — 직관적으로". 관제 오른쪽 "라이더 한눈에"에 위치·전달 상황·오늘 운행시간·대기 시간 네 칸을 둠.
 - 지금 클라이언트: "오늘 운행시간"은 execution `GET /rider-operating-time`(배차 수락 ~ 전달 완료 합계)로 보임. **"대기 시간"은 "서버 값 없음 · 백엔드 요청 중"** — 화면에서 계산해 지어내지 않음.
 

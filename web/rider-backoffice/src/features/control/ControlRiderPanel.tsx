@@ -1,7 +1,10 @@
 // 관제 오른쪽 "라이더 한눈에"(2026-11-18 사용자: "주문번호에 해당하는 라이더를 바로 볼 수 있고, 그 라이더의 위치와 전달 상황과
 // 대기 및 운영 시간을 바로 볼 수 있게 — 직관적으로").
-// - 맨 위 네 칸: 위치(관제) · 전달 상황(관제 진행 중 배송) · 오늘 운행시간(execution 직원용 운행시간 — 배차 수락~전달 완료 합계) ·
-//   대기 시간(서버 값 없음 — 화면에서 계산해 지어내지 않고 백엔드 요청 중).
+// - 맨 위 칸: 위치(관제) · 전달 상황(관제 진행 중 배송, 대기면 tracking 0.9.0 `waitingSince` "대기 N분째") ·
+//   접속 시간(운행을 켜 둔 시간 — `onDutySince` "운행 시작 HH:MM · N시간째" + execution 0.25.0 오늘 `connectedSeconds`) ·
+//   대기 시간(운행 중 + 신규배차 켬 + 맡은 배송 0건 — 오늘 `waitingSeconds`) · 오늘 운행시간(배차 수락 ~ 전달 완료 `totalSeconds`).
+//   세 시간(운행·접속·대기)은 뜻이 달라 섞지 않는다(백엔드 회신 2026-11-18 reply-rider-waiting-time, 사용자 정의).
+//   "N분째"는 서버 시각에서 지금까지 지난 시간을 보이기만 한다(합계는 서버 값).
 // - 배송마다: 단계 진행 줄, 도착 예정·지연(tracking eta), 픽업지 → 전달지(drop-location — 열 때 한 번), 주문번호·품목·요청사항(execution).
 // - 관제 값·배송·도착 예정은 10초마다 새로, 전달지는 열람 기록이 남아 한 번만(dropLocation.ts).
 import { useQuery } from '@tanstack/react-query';
@@ -32,16 +35,22 @@ export const panelMessages = {
   pick: '주문번호나 라이더 ID 로 찾거나, 지도·아래 표에서 라이더를 고르면 위치·전달 상황·운행 시간이 여기에 보여요.',
   gone: '이 라이더는 지금 이 센터의 운행 목록에 없어요(운행 종료·다른 센터).',
   close: '닫기',
-  tile: { location: '위치', delivery: '전달 상황', operating: '오늘 운행시간', waiting: '대기 시간' },
+  tile: { location: '위치', delivery: '전달 상황', connected: '접속 시간', waiting: '대기 시간', operating: '오늘 운행시간' },
   receiving: (s: string) => `수신 중 · ${s}`,
   delivering: (k: number) => `배송 중 ${k}건`,
-  idle: '대기 중',
-  idleHint: '진행 중 배송 없음',
+  waitingFor: (m: string) => `대기 ${m}째`,
+  waitingSinceAt: (t: string) => `${t}부터`,
+  notWaiting: '대기 아님',
+  notWaitingHint: '신규배차 꺼짐 — 대기로 세지 않아요',
+  elapsedNow: (d: string) => `${d}째`,
+  dutyStartAt: (t: string) => `운행 시작 ${t}`,
+  offDuty: '운행 중 아님',
+  todaySum: (s: string) => `오늘 ${s}`,
+  connectedHint: '운행을 켜 둔 시간',
+  waitingHint: '오늘 합계 · 운행 중 · 신규배차 켬 · 맡은 배송 0건',
   operatingHint: '배차 수락 ~ 전달 완료 합계',
-  waitingNone: '서버 값 없음',
-  waitingHint: '백엔드 요청 중',
-  dutyChanged: (t: string) => `상태 바뀐 때 ${t}`,
-  hm: (sec: number) => `${Math.floor(sec / 3600)}시간 ${Math.floor((sec % 3600) / 60)}분`,
+  hm: (sec: number) => (sec < 3600 ? `${Math.floor(sec / 60)}분` : `${Math.floor(sec / 3600)}시간 ${Math.floor((sec % 3600) / 60)}분`),
+  elapsed: (sec: number) => (sec < 3600 ? `${Math.max(0, Math.floor(sec / 60))}분` : `${Math.floor(sec / 3600)}시간 ${Math.floor((sec % 3600) / 60)}분`),
   steps: ['TO_STORE', 'AT_STORE', 'TO_CUSTOMER', 'AT_CUSTOMER'] as const,
   order: '주문번호',
   purpose: '목적',
@@ -62,6 +71,10 @@ export const panelMessages = {
 } as const;
 const p = panelMessages;
 
+/** 시:분만(Asia/Seoul) — 칸 안에서 날짜까지 쓰면 줄이 넘친다 */
+const clockFmt = new Intl.DateTimeFormat('ko-KR', { hour: 'numeric', minute: '2-digit', timeZone: 'Asia/Seoul' });
+const clock = (iso: string) => clockFmt.format(new Date(iso));
+
 const seoulToday = () => new Date(Date.now() + 9 * 3600_000).toISOString().slice(0, 10);
 const minutes = (s: number | undefined | null) => (s == null ? null : Math.max(0, Math.round(s / 60)));
 
@@ -81,12 +94,15 @@ export function ControlRiderPanel({
   selectedId,
   focusDeliveryId,
   onClose,
+  asOf,
 }: {
   readonly rider: Rider | undefined;
   readonly selectedId: string;
   /** 주문번호로 찾았으면 그 배송(라이더가 운행 목록에 없어도 보인다) */
   readonly focusDeliveryId: string;
   readonly onClose: () => void;
+  /** 관제 목록의 서버 기준 시각 — "N분째" 계산 기준 */
+  readonly asOf?: string | undefined;
 }) {
   if (!selectedId) {
     return (
@@ -122,7 +138,7 @@ export function ControlRiderPanel({
         </button>
       </div>
       {!rider && <p className="rounded-box bg-warning/15 px-3 py-2 text-sm">{p.gone}</p>}
-      <SummaryTiles rider={rider} riderId={selectedId} />
+      <SummaryTiles rider={rider} riderId={selectedId} asOf={asOf} />
       {deliveries.length > 0 && (
         <ul className="space-y-3">
           {deliveries.map((d) => (
@@ -136,7 +152,7 @@ export function ControlRiderPanel({
   );
 }
 
-function SummaryTiles({ rider, riderId }: { readonly rider: Rider | undefined; readonly riderId: string }) {
+function SummaryTiles({ rider, riderId, asOf }: { readonly rider: Rider | undefined; readonly riderId: string; readonly asOf: string | undefined }) {
   const api = useApi();
   const today = seoulToday();
   const time = useQuery({
@@ -144,12 +160,12 @@ function SummaryTiles({ rider, riderId }: { readonly rider: Rider | undefined; r
     refetchInterval: CONTROL_REFRESH_MS * 6,
     queryFn: () => request('GET', api.execution.GET('/rider-operating-time', { params: { query: { riderId, from: today, to: today } } })),
   });
-  const detail = useQuery({
-    queryKey: ['rider', riderId],
-    queryFn: () => request('GET', api.riders.GET('/riders/{riderId}', { params: { path: { riderId } } })),
-  });
-  const changedAt = detail.data?.operating?.changedAt;
   const active = rider?.activeDeliveries ?? [];
+  // "N분째" = 관제 목록의 서버 기준 시각(asOf, 10초마다 새로) − 시작 시각. 화면 시계는 쓰지 않는다(합계는 서버 값).
+  const since = (iso: string) => (asOf ? (new Date(asOf).getTime() - new Date(iso).getTime()) / 1000 : 0);
+  const sums = time.data;
+  // 운행시간 합계(totalSeconds)는 늘 오고, 접속·대기 합은 rider 를 못 부르면 null — "못 불러옴"
+  const sum = (v: number | null | undefined) => (time.isError ? p.loadFailed : !sums ? '…' : v == null ? p.loadFailed : p.hm(v));
   const location = !rider ? (
     <Tile label={p.tile.location} value={none} testId="tile-location" />
   ) : !rider.location ? (
@@ -165,19 +181,29 @@ function SummaryTiles({ rider, riderId }: { readonly rider: Rider | undefined; r
       {rider ? (
         active.length > 0 ? (
           <Tile label={p.tile.delivery} value={p.delivering(active.length)} tone="info" hint={active.map((a) => label(n.stage, a.stage)).join(' · ')} testId="tile-delivery" />
+        ) : rider.waitingSince ? (
+          <Tile label={p.tile.delivery} value={p.waitingFor(p.elapsed(since(rider.waitingSince)))} tone="success" hint={p.waitingSinceAt(clock(rider.waitingSince))} testId="tile-delivery" />
         ) : (
-          <Tile label={p.tile.delivery} value={p.idle} hint={p.idleHint} testId="tile-delivery" />
+          <Tile label={p.tile.delivery} value={p.notWaiting} hint={p.notWaitingHint} testId="tile-delivery" />
         )
       ) : (
         <Tile label={p.tile.delivery} value={none} testId="tile-delivery" />
       )}
       <Tile
-        label={p.tile.operating}
-        value={time.isSuccess ? p.hm(time.data.totalSeconds) : time.isError ? <span className="text-sm text-error">{p.loadFailed}</span> : '…'}
-        hint={p.operatingHint}
-        testId="tile-operating"
+        label={p.tile.connected}
+        value={rider?.onDutySince ? p.elapsedNow(p.elapsed(since(rider.onDutySince))) : <span className="text-sm text-base-content/50">{p.offDuty}</span>}
+        hint={[rider?.onDutySince ? p.dutyStartAt(clock(rider.onDutySince)) : null, p.todaySum(sum(sums?.connectedSeconds)), p.connectedHint].filter(Boolean).join(' · ')}
+        testId="tile-connected"
       />
-      <Tile label={p.tile.waiting} value={<span className="text-sm font-medium text-base-content/50">{p.waitingNone}</span>} hint={[p.waitingHint, changedAt ? p.dutyChanged(when(changedAt)) : null].filter(Boolean).join(' · ')} testId="tile-waiting" />
+      <Tile label={p.tile.waiting} value={sum(sums?.waitingSeconds)} hint={p.waitingHint} testId="tile-waiting" />
+      <div className="col-span-2">
+        <Tile
+          label={p.tile.operating}
+          value={time.isError ? <span className="text-sm text-error">{p.loadFailed}</span> : sums ? p.hm(sums.totalSeconds) : '…'}
+          hint={p.operatingHint}
+          testId="tile-operating"
+        />
+      </div>
     </div>
   );
 }

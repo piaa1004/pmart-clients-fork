@@ -9,13 +9,16 @@ import { as, renderAt } from '../../test/render';
 import { server } from '../../test/server';
 
 const at = '2026-11-17T05:00:00.000Z';
+/** 관제 목록 기준 시각(asOf = at)에서 sec 초 전 */
+const ago = (sec: number) => new Date(Date.parse(at) - sec * 1000).toISOString();
 const board = {
   asOf: at,
   items: [
-    { riderId: 'RD-7', nameMasked: '김*수', location: { lat: 35.15, lng: 129.06, recordedAt: at, receivedAt: at, quality: 'GOOD' }, stale: false, staleSinceSeconds: 5, activeDeliveries: [{ deliveryId: 'DLV-1', stage: 'TO_CUSTOMER' }] },
+    { riderId: 'RD-7', nameMasked: '김*수', location: { lat: 35.15, lng: 129.06, recordedAt: at, receivedAt: at, quality: 'GOOD' }, stale: false, staleSinceSeconds: 5, onDutySince: ago(125 * 60), waitingSince: null, activeDeliveries: [{ deliveryId: 'DLV-1', stage: 'TO_CUSTOMER' }] },
     { riderId: 'RD-8', nameMasked: '이*희', location: { lat: 35.16, lng: 129.04, recordedAt: at, receivedAt: at, quality: 'GOOD' }, stale: true, staleSinceSeconds: 305, activeDeliveries: [] },
     { riderId: 'RD-9', nameMasked: '박*민', location: null, stale: true, staleSinceSeconds: null, activeDeliveries: [] },
-    { riderId: 'RD-10', nameMasked: '최*영', location: { lat: 35.17, lng: 129.05, recordedAt: at, receivedAt: at, quality: 'GOOD' }, stale: false, staleSinceSeconds: 3, activeDeliveries: [] },
+    // 대기 중(운행 + 신규배차 켬 + 배송 0건) — tracking 0.9.0 waitingSince
+    { riderId: 'RD-10', nameMasked: '최*영', location: { lat: 35.17, lng: 129.05, recordedAt: at, receivedAt: at, quality: 'GOOD' }, stale: false, staleSinceSeconds: 3, onDutySince: ago(50 * 60), waitingSince: ago(12 * 60 + 5), activeDeliveries: [] },
   ],
 };
 
@@ -67,8 +70,14 @@ describe('관제 — 라이더 한눈에', () => {
     expect(panel).toHaveTextContent('RD-7');
     expect(within(panel).getByTestId('tile-location')).toHaveTextContent('수신 중 · 5초 전');
     expect(within(panel).getByTestId('tile-delivery')).toHaveTextContent('배송 중 1건');
-    expect(await within(panel).findByText('1시간 30분')).toBeInTheDocument(); // 목 운행시간 5400초
-    expect(within(panel).getByTestId('tile-waiting')).toHaveTextContent('서버 값 없음');
+    // 세 시간은 따로: 운행시간(수락~완료 5400초) · 접속(운행 켬 9000초, 운행 시작 2시간 5분째) · 대기(1800초)
+    expect(await within(panel).findByText('1시간 30분')).toBeInTheDocument();
+    expect(within(panel).getByTestId('tile-operating')).toHaveTextContent('배차 수락 ~ 전달 완료');
+    expect(within(panel).getByTestId('tile-connected')).toHaveTextContent('2시간 5분째');
+    expect(within(panel).getByTestId('tile-connected')).toHaveTextContent('오늘 2시간 30분');
+    expect(within(panel).getByTestId('tile-connected')).toHaveTextContent('운행 시작 오전 11:55'); // asOf 14:00(서울) − 2시간 5분
+    expect(within(panel).getByTestId('tile-waiting')).toHaveTextContent('30분');
+    expect(within(panel).getByTestId('tile-waiting')).toHaveTextContent('오늘 합계');
     // 단계는 관제 값(TO_CUSTOMER) — 위 칸·표와 같은 원천
     expect(within(panel).getByTestId('stage-steps').querySelector('[aria-current="step"]')).toHaveTextContent('고객에게');
     const order = await within(panel).findByTestId('panel-order');
@@ -126,10 +135,25 @@ describe('관제 — 라이더 한눈에', () => {
     server.use(http.get(`${API_BASE}/rider-locations`, () => HttpResponse.json(board)));
     const view = renderAt('/control?mfcId=MFC-BSJ-01&rider=RD-10', as.riderOps);
     const panel = await screen.findByTestId('control-panel');
-    expect(within(panel).getByTestId('tile-delivery')).toHaveTextContent('대기 중');
+    expect(within(panel).getByTestId('tile-delivery')).toHaveTextContent('대기 12분째');
+    expect(within(panel).getByTestId('tile-connected')).toHaveTextContent('50분째');
     expect(sentTo(view, '/drop-location')).toHaveLength(0);
     await userEvent.click(within(panel).getByRole('button', { name: '닫기' }));
     expect(await screen.findByTestId('control-panel-empty')).toBeInTheDocument();
+  });
+
+  it('신규배차를 꺼 두면 대기로 세지 않고, 접속·대기 합을 못 받으면(null) 0 이 아니라 "못 불러옴"', async () => {
+    server.use(
+      http.get(`${API_BASE}/rider-locations`, () => HttpResponse.json(board)),
+      http.get(`${API_BASE}/rider-operating-time`, () => HttpResponse.json({ from: '2026-11-18', to: '2026-11-18', totalSeconds: 600, connectedSeconds: null, waitingSeconds: null, days: [] })),
+    );
+    renderAt('/control?mfcId=MFC-BSJ-01&rider=RD-8', as.riderOps);
+    const panel = await screen.findByTestId('control-panel');
+    expect(within(panel).getByTestId('tile-delivery')).toHaveTextContent('대기 아님');
+    expect(within(panel).getByTestId('tile-connected')).toHaveTextContent('운행 중 아님');
+    expect(await within(panel).findByText('10분')).toBeInTheDocument(); // 운행시간은 그대로
+    expect(within(panel).getByTestId('tile-waiting')).toHaveTextContent('못 불러옴');
+    expect(within(panel).getByTestId('tile-connected')).toHaveTextContent('못 불러옴');
   });
 
   it('배송 내역을 못 읽으면 그 칸만 오류(다시 시도), 빈 값으로 보이지 않는다', async () => {

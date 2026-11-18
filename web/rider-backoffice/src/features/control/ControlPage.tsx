@@ -177,7 +177,7 @@ export function ControlPage() {
                   {/* 지도 + 오른쪽 상세 칸: 실시간 위치와 고른 라이더의 픽업지·주문 내역·도착 예정을 한 화면에서 */}
                   <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_24rem]">
                     <KakaoRiderMap center={centerPoint} riders={mapRiders} onSelect={select} selectedId={selectedId} routes={routes} />
-                    <ControlRiderPanel rider={all.find((r) => r.riderId === selectedId)} selectedId={selectedId} focusDeliveryId={focusDeliveryId} onClose={() => select('')} />
+                    <ControlRiderPanel rider={all.find((r) => r.riderId === selectedId)} selectedId={selectedId} focusDeliveryId={focusDeliveryId} onClose={() => select('')} asOf={b.asOf} />
                   </div>
                 </Section>
                 <div className="flex flex-wrap items-center justify-between gap-2 px-1">
