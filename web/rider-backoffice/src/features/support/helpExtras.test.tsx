@@ -3,7 +3,12 @@ import { screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { http, HttpResponse } from 'msw';
+
+import { API_BASE } from '../../api/client';
+import { mockDeliveries } from '../../mocks/deliveryHandlers';
 import { as, renderAt } from '../../test/render';
+import { server } from '../../test/server';
 
 const sentTo = (sent: readonly Request[], tail: string) => sent.filter((r) => r.method === 'POST' && new URL(r.url).pathname.endsWith(tail));
 
@@ -101,5 +106,20 @@ describe('상담 화면에서 바로 배송 조치(사용자 2026-11-19 "배송�
     const post = sentTo(view.sent, '/failure-decisions')[0]!;
     expect(post.headers.get('Idempotency-Key')).toBeTruthy();
     expect(((await post.clone().json()) as { decision: string }).decision).toBe('REJECT');
+  });
+});
+
+describe('반려 직후 "직접 실패 처리"가 같은 자리에 떠도 두 번 눌림으로 확정되지 않는다(28767701-1, 사용자 2026-11-19)', () => {
+  it('직접 실패 처리는 확인 칸을 체크해야 보낼 수 있다', async () => {
+    // 반려되면 서버가 픽업으로 되돌린다 — 그 뒤 상태를 흉내
+    server.use(http.get(`${API_BASE}/deliveries/DLV-1`, () => HttpResponse.json({ ...mockDeliveries[0]!, state: 'PICKED_UP', failure: null })));
+    const view = renderAt('/help-requests/DLV-1/HR-1', as.riderOps);
+    const direct = await screen.findByRole('form', { name: '지원센터 직접 실패 처리' });
+    const send = within(direct).getByRole('button', { name: '보내기' });
+    expect(send).toBeDisabled();
+    await userEvent.click(send); // 두 번째 눌림 자리 — 아무것도 보내지 않는다
+    expect(sentTo(view.sent, '/failure-decisions')).toHaveLength(0);
+    await userEvent.click(within(direct).getByRole('checkbox'));
+    expect(send).toBeEnabled();
   });
 });

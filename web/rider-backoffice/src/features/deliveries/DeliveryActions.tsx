@@ -266,13 +266,16 @@ function FailureDecisionForm({ delivery, direct }: { readonly delivery: Delivery
       refresh();
     }
   });
+  // 직접 확정은 확인 칸을 체크해야 보낼 수 있다 — 반려 직후 같은 자리에 이 양식이 떠서 두 번 누르면
+  // "확정·다른 라이더 반납"으로 들어갔다(사용자 2026-11-19 28767701-1).
+  const [sure, setSure] = useState(false);
   const title = direct ? a.directTitle : a.decideTitle;
   return (
     <ActionBox
       title={title}
       intro={direct ? a.directIntro : a.decideIntro}
       onSubmit={() => {
-        if (!decision) return;
+        if (!decision || (direct && !sure)) return;
         void decide.run({
           decision,
           ...(decision === 'CONFIRM' ? { custody, ...(custody === 'RIDER' ? { returnBy } : {}) } : {}),
@@ -283,7 +286,7 @@ function FailureDecisionForm({ delivery, direct }: { readonly delivery: Delivery
       footer={
         <>
           <div className="flex justify-end">
-            <button type="submit" className="btn btn-sm btn-primary w-24" disabled={!decision || decide.busy || decide.phase.kind === 'done'}>
+            <button type="submit" className="btn btn-sm btn-primary w-24" disabled={!decision || (direct && !sure) || decide.busy || decide.phase.kind === 'done'}>
               {a.decide}
             </button>
           </div>
@@ -347,6 +350,12 @@ function FailureDecisionForm({ delivery, direct }: { readonly delivery: Delivery
       <Field name={a.note} wide>
         <textarea className="textarea w-full" rows={2} maxLength={500} value={note} onChange={(e) => setNote(e.target.value)} />
       </Field>
+      {direct && (
+        <label className="flex items-start gap-2 rounded-box bg-warning/15 px-3 py-2 text-sm">
+          <input type="checkbox" className="checkbox checkbox-sm mt-0.5" checked={sure} onChange={(e) => setSure(e.target.checked)} />
+          <span>{a.directSure}</span>
+        </label>
+      )}
     </ActionBox>
   );
 }

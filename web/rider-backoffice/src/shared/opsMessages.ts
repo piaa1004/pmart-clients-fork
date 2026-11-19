@@ -110,6 +110,7 @@ export const ops = {
     decideIntro: '확정하면 배송이 끝나요. 상품이 라이더에게 있으면 반납 배송이 생겨요.',
     directTitle: '지원센터 직접 실패 처리',
     directIntro: '라이더가 사고 등으로 실패 등록을 못 할 때만 — 픽업 뒤·전달 전 배송을 바로 확정해요.',
+    directSure: '라이더가 실패 등록을 못 한 경우예요. 이 배송을 전달 실패로 확정해요(되돌릴 수 없어요).',
     decision: '판정',
     custody: '상품 위치',
     returnBy: '반납할 사람',
