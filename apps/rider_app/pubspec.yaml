@@ -42,6 +42,8 @@ dependencies:
   # 네이버는 서버가 ID 토큰(인가 코드 + PKCE)만 받아(ADR-0071) 액세스 토큰만 주는 flutter_naver_login 은 넣지 않았다 —
   # flutter_appauth(고객앱 안내 docs/operations/social-login-kakao-naver.md) 승인 뒤 붙인다.
   kakao_flutter_sdk_user: ^2.1.0
+  # 네이버 로그인 — OIDC 인가 코드 + PKCE 로 id_token(서버 rider-auth 0.2.0 이 받는 것). 고객앱과 같은 버전, 사용자 승인 2026-11-19.
+  flutter_appauth: ^13.0.0
   pmart_api_delivery_execution:
     path: ../../packages/pmart_api/gen/delivery-execution
   pmart_api_mfc_fulfillment:

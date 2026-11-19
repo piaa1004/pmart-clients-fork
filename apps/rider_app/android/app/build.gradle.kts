@@ -47,8 +47,10 @@ android {
         versionCode = flutter.versionCode
         versionName = flutter.versionName
         // 소셜 로그인 키는 빌드 때 `--dart-define-from-file=.secrets/rider.env` 로만 들어온다(저장소에 넣지 않음). 없으면 빈 값 — 빌드는 된다.
-        // 카카오: 로그인 뒤 돌아오는 주소 kakao{네이티브 앱 키}://oauth. (네이버는 OIDC+PKCE 패키지 승인 뒤 redirect scheme 을 더한다.)
+        // 카카오: 로그인 뒤 돌아오는 주소 kakao{네이티브 앱 키}://oauth.
+        // 네이버(flutter_appauth): 로그인 뒤 돌아오는 주소 com.pmart.rider://oauth/naver — scheme 에 밑줄 못 씀(패키지명 그대로 안 씀).
         manifestPlaceholders["kakaoNativeAppKey"] = dartDefines["KAKAO_NATIVE_APP_KEY"] ?: ""
+        manifestPlaceholders["appAuthRedirectScheme"] = "com.pmart.rider"
     }
 
     buildTypes {

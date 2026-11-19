@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:pmart_core/pmart_core.dart';
 import 'package:pmart_ui/pmart_ui.dart';
 import 'package:rider_app/app.dart';
+import 'package:rider_app/features/auth/data/kakao_naver_token_sources.dart';
 import 'package:rider_app/features/auth/data/phone_identity.dart';
 import 'package:rider_app/features/auth/data/rider_auth.dart';
 import 'package:rider_app/features/auth/data/session.dart';
@@ -303,5 +304,13 @@ void main() {
     );
     addTearDown(m.dispose);
     expect(m.read(phoneIdentityRepositoryProvider), isNotNull);
+  });
+
+  test('네이버(OIDC+PKCE): Client ID 가 없으면 브라우저를 열지 않고 설정 문제로 알린다, 돌아오는 주소는 com.pmart.rider', () async {
+    expect(naverRedirectUrl, 'com.pmart.rider://oauth/naver');
+    await expectLater(
+      const NaverIdTokenSource(clientId: '  ').obtain(),
+      throwsA(isA<RiderLoginMisconfigured>()),
+    );
   });
 }

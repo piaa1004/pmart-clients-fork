@@ -1,4 +1,5 @@
 import 'package:flutter/services.dart' show PlatformException;
+import 'package:flutter_appauth/flutter_appauth.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:kakao_flutter_sdk_user/kakao_flutter_sdk_user.dart';
 
@@ -48,15 +49,53 @@ final class KakaoIdTokenSource implements SocialTokenSource {
   }
 }
 
-/// 네이버 로그인 자리. rider-auth 0.2.0(PR #250, 병합 전)은 네이버도 **ID 토큰**(OIDC 인가 코드 + PKCE 로 받은 id_token,
-/// aud = Client ID)만 받는다(고객 ADR-0071, `docs/operations/social-login-kakao-naver.md` §3). 네이버 로그인 SDK
-/// (flutter_naver_login)는 액세스 토큰만 줘서 쓰지 않는다. OIDC 패키지(고객앱은 flutter_appauth)는 라이더 앱에
-/// 넣는 승인을 받은 뒤 붙인다 — 그 전에는 서버·브라우저를 부르지 않고 설정 문제로 알린다.
+/// 네이버 로그인 뒤 돌아오는 앱 주소 — build.gradle `appAuthRedirectScheme`(com.pmart.rider)와 같은 scheme.
+/// 네이버 콘솔이 앱 주소를 받지 않으면 게이트웨이 중계 주소(고객앱 BR-66 과 같은 방식)를 빌드 때 `NAVER_REDIRECT_URL` 로 넣는다.
+const naverRedirectUrl = String.fromEnvironment(
+  'NAVER_REDIRECT_URL',
+  defaultValue: 'com.pmart.rider://oauth/naver',
+);
+
+/// 네이버 OIDC 공개 설정(https://nid.naver.com/.well-known/openid-configuration — 고객앱과 같음).
+const _naverOidc = AuthorizationServiceConfiguration(
+  authorizationEndpoint: 'https://nid.naver.com/oauth2/authorize',
+  tokenEndpoint: 'https://nid.naver.com/oauth2/token',
+);
+
+/// 네이버: OIDC 인가 코드 + PKCE(S256) → id_token(aud = Client ID). Client Secret 은 앱에 넣지 않는다(토큰 엔드포인트 인증 none).
 final class NaverIdTokenSource implements SocialTokenSource {
-  const NaverIdTokenSource();
+  const NaverIdTokenSource({
+    this.clientId = const String.fromEnvironment('NAVER_CLIENT_ID'),
+  });
+
+  static const _appAuth = FlutterAppAuth();
+  final String clientId;
 
   @override
-  Future<String?> obtain() async => throw const RiderLoginMisconfigured();
+  Future<String?> obtain() async {
+    final id = clientId.trim();
+    if (id.isEmpty) throw const RiderLoginMisconfigured();
+    try {
+      final result = await _appAuth.authorizeAndExchangeCode(
+        AuthorizationTokenRequest(
+          id,
+          naverRedirectUrl,
+          scopes: const ['openid'],
+          serviceConfiguration: _naverOidc,
+        ),
+      );
+      final idToken = result.idToken;
+      if (idToken == null || idToken.isEmpty) {
+        throw const RiderLoginMisconfigured();
+      }
+      return idToken;
+    } on FlutterAppAuthUserCancelledException {
+      return null; // 라이더가 로그인 화면을 닫음
+    } on PlatformException {
+      // 콘솔 Callback URL 이 없거나 네이버가 거절 — 상세(토큰·코드)는 화면·로그에 쓰지 않는다.
+      throw const RiderLoginUnavailable();
+    }
+  }
 
   @override
   Future<void> signOut() async {}
