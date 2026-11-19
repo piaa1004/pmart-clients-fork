@@ -324,7 +324,7 @@ void showRiderToast(
 }
 
 /// 안내(회색 팝업)가 떠 있는 시간 — 기본 4초는 길어 입력·버튼을 가린다(사용자 2026-11-19 "조금 길어").
-const riderToastDuration = Duration(milliseconds: 2500);
+const riderToastDuration = Duration(seconds: 2);
 
 /// 키보드가 떠 있을 때 화면 위쪽에 띄우려고 비워 두는 높이(안내 한두 줄).
 const riderToastHeight = 80.0;
