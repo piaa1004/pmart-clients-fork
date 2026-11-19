@@ -122,12 +122,15 @@ export function resetCases() {
   closedCases.clear();
 }
 
+// 목록에는 없지만 도움요청(HR-CASE)에 붙은 접수 건 — 상담 완료 시험용
+const helpOnlyCases = [{ caseId: 'CASE-9', kind: 'RIDER_HELP', state: 'IN_PROGRESS', assigneeId: null, summary: '도움요청' } as unknown as Case];
+
 export const caseCloseHandlers = [
   http.post(`${API_BASE}/cases/:caseId/closures`, async ({ request, params }) => {
     const who = operator(request);
     if (!who) return unauthorized();
     const id = String(params['caseId']);
-    const found = closedCases.get(id) ?? mockCases.find((c) => c.caseId === id);
+    const found = closedCases.get(id) ?? mockCases.find((c) => c.caseId === id) ?? helpOnlyCases.find((c) => c.caseId === id);
     if (!found || !visibleTo(who.roles, found)) return problem(404, 'NOT_FOUND');
     if (found.state === 'CLOSED') return problem(409, 'INVALID_STATE');
     if (found.assigneeId && found.assigneeId !== who.subject && !who.roles.includes('OPERATOR_ADMIN')) return problem(403, 'FORBIDDEN');

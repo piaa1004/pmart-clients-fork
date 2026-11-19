@@ -237,7 +237,6 @@ function HelpChatPage() {
   const tabs = [
     { id: 'sec-request', label: sm.help.request },
     { id: 'sec-photos', label: sm.help.photos },
-    { id: 'sec-resolve', label: sm.help.resolve },
     { id: 'sec-chat', label: sm.help.chat },
   ];
   return (
@@ -256,9 +255,12 @@ function HelpChatPage() {
         }
         summary={d && [`배송 ${deliveryLabel}`, d.stage ? `${sm.helpCol.stage} ${label(n.executionState, d.stage)}` : null, `${h.col.createdAt} ${when(d.createdAt)}`].filter(Boolean).join(' · ')}
         actions={
-          <Link className="btn btn-sm border-base-300 bg-base-100" to={`/deliveries/${encodeURIComponent(deliveryId)}`}>
+          <>
+            {d && <ResolvePanel help={d} deliveryId={deliveryId} requestId={requestId} />}
+            <Link className="btn btn-sm border-base-300 bg-base-100" to={`/deliveries/${encodeURIComponent(deliveryId)}`}>
             {sm.help.goDelivery}
           </Link>
+          </>
         }
       />
       <SectionTabs items={tabs} />
@@ -304,9 +306,6 @@ function HelpChatPage() {
             <>
               <Section id="sec-photos" title={photoMessages.title(helpExtrasMessages.photos.label, photoRefs.length)}>
                 <EvidencePhotos deliveryId={deliveryId} refs={photoRefs} heading={false} />
-              </Section>
-              <Section id="sec-resolve" title={helpExtrasMessages.resolve.title}>
-                <ResolvePanel help={d} deliveryId={deliveryId} requestId={requestId} />
               </Section>
             </>
           )}
