@@ -75,3 +75,18 @@ describe('도움요청 상세 — 증빙 사진·처리함·가리기', () => {
     expect(screen.queryByRole('button', { name: '가리기' })).not.toBeInTheDocument();
   });
 });
+
+describe('상담함 — 배송 도움요청과 일반 문의를 한 목록에(사용자 2026-11-19)', () => {
+  it('두 종류가 함께 보이고 배송 도움요청이 먼저, 누르면 각자 대화로', async () => {
+    renderAt('/consults', as.riderOps);
+    const rows = await screen.findAllByTestId('consult-row');
+    const kinds = rows.map((r) => r.getAttribute('data-kind'));
+    expect(kinds).toContain('help');
+    expect(kinds).toContain('inquiry');
+    expect(kinds.indexOf('inquiry')).toBeGreaterThan(kinds.lastIndexOf('help'));
+    expect(rows[0]).toHaveTextContent('배송 도움요청');
+    const inquiry = rows.find((r) => r.getAttribute('data-kind') === 'inquiry')!;
+    expect(inquiry).toHaveTextContent('일반 문의');
+    expect(within(inquiry).getByRole('link')).toHaveAttribute('href', expect.stringMatching(/^\/inquiries\//));
+  });
+});

@@ -157,9 +157,9 @@ export const ops = {
     reply: '답변',
     send: '보내기',
     sent: '보냈어요.',
-    close: '문의 닫기',
-    closeReason: '닫는 사유(2~500자)',
-    closed: '닫았어요.',
+    close: '상담 완료',
+    closeReason: '처리 내용(2~500자 — 직원에게만 보여요)',
+    closed: '상담을 완료했어요.',
   },
   earnings: {
     adjustTitle: '수행료 조정',

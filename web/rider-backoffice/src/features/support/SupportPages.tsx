@@ -3,18 +3,17 @@
 // 2026-11-18: 배민 주문접수 모양 — 목록(쪽 머리 → 검색 조건/상태 탭 → 결과 줄 → 표, 줄 누르면 상세),
 // 상세(머리: 번호·상태·요약 → 구역 이동 탭 → 왼쪽 요청 내용·사진·처리 / 오른쪽 대화).
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { useState, type FormEvent } from 'react';
-import { Link, Route, Routes, useNavigate, useParams, useSearchParams } from 'react-router';
+import { useState, type ReactNode } from 'react';
+import { Link, Navigate, Route, Routes, useNavigate, useParams, useSearchParams } from 'react-router';
 
 import { request } from '@pmart/web-core';
 import { CommandFeedback, QueryState, toUiState, useCommand } from '@pmart/web-ui';
 import { commandParams } from '../../api/command';
-import type { components } from '../../api/generated/delivery-execution';
 import { useApi } from '../../app/ApiContext';
 import { useSession } from '../../app/SessionContext';
 import { photoMessages } from '../../shared/AuthedPhotos';
-import { ChipGroup, CursorPager, DataTable, DetailHeader, FieldList, PageHeader, ResultBar, SearchPanel, SearchRow, Section, SectionTabs, StatusBadge } from '../../shared/admin';
-import { DeliveryNo, DeliveryRef, resolveRiderId, RiderName, RiderRef, StaffName, SystemIds, useDeliveryNumbers, useRiderSummaries } from '../../shared/displayNumbers';
+import { DataTable, DetailHeader, FieldList, PageHeader, ResultBar, Section, SectionTabs, StatusBadge } from '../../shared/admin';
+import { DeliveryNo, DeliveryRef, RiderName, RiderRef, StaffName, SystemIds, useDeliveryNumbers, useRiderSummaries } from '../../shared/displayNumbers';
 import { messages } from '../../shared/messages';
 import { ops } from '../../shared/opsMessages';
 import { label, none, when } from '../../shared/opsUi';
@@ -50,7 +49,7 @@ const sm = {
     content: '문의 내용',
     photos: '사진',
     chat: '대화',
-    close: '닫기',
+    close: '상담 완료',
     rider: '라이더',
     answeredAt: '답한 때',
     closedAt: '닫힌 때',
@@ -62,18 +61,18 @@ const sm = {
 } as const;
 
 /** 도움요청 종류 — 계약(execution HelpCategory) 값 이름. 공통 이름표에 없는 값은 여기서 채운다 */
-const HELP_CATEGORIES = ['CUSTOMER_UNREACHABLE', 'ADDRESS_ISSUE', 'GOODS_ISSUE', 'PHOTO_UPLOAD_FAILED', 'ACCIDENT', 'APP_ERROR', 'STORE_WAITING', 'STATUS_CORRECTION', 'DELIVERY_FAILURE', 'OTHER'] as const satisfies readonly components['schemas']['HelpCategory'][];
 const helpCategoryName: Readonly<Record<string, string>> = n.helpCategory;
-const HELP_STATES = ['OPEN', 'IN_PROGRESS', 'RESOLVED'] as const;
-type HelpState = (typeof HELP_STATES)[number];
+type HelpState = 'OPEN' | 'IN_PROGRESS' | 'RESOLVED';
 const HELP_PAGE_SIZE = 50;
+const consultBack = '상담함';
 
 // ---------------- 도움요청
 
 export function HelpRequestsMenu() {
   return (
     <Routes>
-      <Route index element={<HelpQueuePage />} />
+      {/* 목록은 상담함으로 합쳤다(2026-11-19) — 옛 주소는 상담함으로 */}
+      <Route index element={<Navigate to="/consults" replace />} />
       <Route path=":deliveryId/:requestId" element={<HelpChatPage />} />
     </Routes>
   );
@@ -81,128 +80,6 @@ export function HelpRequestsMenu() {
 
 const helpPath = (deliveryId: string | undefined, requestId: string | undefined) => `/help-requests/${encodeURIComponent(deliveryId ?? '')}/${encodeURIComponent(requestId ?? '')}`;
 
-function HelpQueuePage() {
-  const api = useApi();
-  const navigate = useNavigate();
-  const [params, setParams] = useSearchParams();
-  const rawState = params.get('state') ?? '';
-  // 계약 기본값은 OPEN — 주소에 없으면 OPEN
-  const state: HelpState = (HELP_STATES as readonly string[]).includes(rawState) ? (rawState as HelpState) : 'OPEN';
-  const rawCategory = params.get('category') ?? '';
-  const category = (HELP_CATEGORIES as readonly string[]).includes(rawCategory) ? (rawCategory as (typeof HELP_CATEGORIES)[number]) : undefined;
-  const riderId = params.get('riderId') ?? '';
-  const cursor = params.get('cursor') ?? '';
-  const [draftRider, setDraftRider] = useState(riderId);
-  const set = (next: Partial<{ state: string; category: string; riderId: string; cursor: string }>) => {
-    const v = { state: state === 'OPEN' ? '' : state, category: category ?? '', riderId, cursor: '', ...next };
-    setParams({
-      ...(v.state && v.state !== 'OPEN' ? { state: v.state } : {}),
-      ...(v.category ? { category: v.category } : {}),
-      ...(v.riderId ? { riderId: v.riderId } : {}),
-      ...(v.cursor ? { cursor: v.cursor } : {}),
-    });
-  };
-  const queue = useQuery({
-    queryKey: ['help-queue', state, category, riderId, cursor],
-    refetchInterval: 15_000,
-    queryFn: async () => {
-      // 라이더 번호 6자리로도 찾는다(ADR-0070) — 맞는 라이더가 없으면 빈 목록
-      const rid = riderId ? await resolveRiderId(api, riderId) : '';
-      if (rid === null) return { items: [], page: { nextCursor: null } };
-      return request(
-        'GET',
-        api.execution.GET('/delivery-help-requests', {
-          params: { query: { size: HELP_PAGE_SIZE, state, ...(category ? { category } : {}), ...(rid ? { riderId: rid } : {}), ...(cursor ? { cursor } : {}) } },
-        }),
-      );
-    },
-  });
-  // 라이더는 화면 번호로(ADR-0070), 기다린 시간은 30초마다(급한 건이 먼저 눈에 띄게 — 2026-11-19)
-  const riders = useRiderSummaries((queue.data?.items ?? []).map((it) => it.riderId));
-  const deliveryNos = useDeliveryNumbers((queue.data?.items ?? []).map((it) => it.deliveryId));
-  const now = useNow();
-  const submit = (e: FormEvent) => {
-    e.preventDefault();
-    set({ riderId: draftRider.trim() });
-  };
-  const reset = () => {
-    setDraftRider('');
-    setParams({});
-  };
-  return (
-    <section className="space-y-4">
-      <PageHeader title={h.title} description={h.intro} />
-      <SearchPanel onSubmit={submit} onReset={reset}>
-        <SearchRow label={sm.helpSearch.state}>
-          <ChipGroup label={sm.helpSearch.state} value={state} options={HELP_STATES.map((s) => ({ value: s, label: label(n.helpState, s) }))} onChange={(v) => set({ state: v })} />
-        </SearchRow>
-        <SearchRow label={sm.helpSearch.category}>
-          <ChipGroup
-            label={sm.helpSearch.category}
-            value={category ?? ''}
-            options={[{ value: '', label: sm.helpSearch.allCategories }, ...HELP_CATEGORIES.map((c) => ({ value: c, label: label(helpCategoryName, c) }))]}
-            onChange={(v) => set({ category: v })}
-          />
-        </SearchRow>
-        <SearchRow label={sm.helpSearch.rider}>
-          <input className="input input-sm w-48" aria-label={sm.helpSearch.rider} value={draftRider} maxLength={64} placeholder={sm.helpSearch.riderHint} onChange={(e) => setDraftRider(e.target.value)} />
-        </SearchRow>
-      </SearchPanel>
-      <QueryState state={toUiState(queue, (x) => (x.items ?? []).length === 0)} onRetry={() => void queue.refetch()} emptyText={h.empty}>
-        {(x) => {
-          const items = x.items ?? [];
-          const nextCursor = x.page?.nextCursor ?? null;
-          return (
-            <div className="space-y-3">
-              <ResultBar count={items.length} more={!!nextCursor} extra={<span className="text-xs text-base-content/50">{`오래된 것부터 · ${sm.autoRefresh(15)}`}</span>} />
-              <DataTable>
-                <thead>
-                  <tr>
-                    <th>{h.col.category}</th>
-                    <th>{h.col.state}</th>
-                    <th>{h.col.delivery}</th>
-                    <th>{sm.helpCol.stage}</th>
-                    <th>{h.col.rider}</th>
-                    <th>{sm.helpCol.photos}</th>
-                    <th>{h.col.createdAt}</th>
-                    <th>{waitCol}</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {items.map((it) => (
-                    <tr key={`${it.deliveryId}:${it.requestId}`} data-testid="help-row" className="cursor-pointer" onClick={() => void navigate(helpPath(it.deliveryId, it.requestId))}>
-                      {/* 요청 ID(시스템 ID)는 목록에 내지 않는다(ADR-0070) — 종류를 누르면 대화, ID 는 대화 화면의 접힌 "시스템 번호" */}
-                      <td className="whitespace-nowrap font-semibold">
-                        <Link className="hover:underline" to={helpPath(it.deliveryId, it.requestId)} onClick={(e) => e.stopPropagation()}>
-                          {label(helpCategoryName, it.category)}
-                        </Link>
-                      </td>
-                      <td>
-                        <span className="flex flex-wrap items-center gap-1">
-                          <StatusBadge tone={helpTone(it.state)}>{label(n.helpState, it.state)}</StatusBadge>
-                          {it.caseId && <StatusBadge tone="accent">{sm.hasCase}</StatusBadge>}
-                        </span>
-                      </td>
-                      <td>
-                        <DeliveryRef deliveryId={it.deliveryId} numbers={deliveryNos.get(it.deliveryId ?? '')} />
-                      </td>
-                      <td className="whitespace-nowrap">{label(n.executionState, it.stage)}</td>
-                      <td>{it.riderId ? <RiderName riderId={it.riderId} nameMasked={riders.get(it.riderId)?.nameMasked} riderNumber={riders.get(it.riderId)?.riderNumber} /> : none}</td>
-                      <td className="tabular-nums">{sm.photoCount(it.photoCount ?? 0)}</td>
-                      <td className="whitespace-nowrap">{when(it.createdAt)}</td>
-                      <td className="whitespace-nowrap">{it.state === 'RESOLVED' ? none : <WaitBadge from={it.createdAt} now={now} />}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </DataTable>
-              <CursorPager hasPrev={!!cursor} nextCursor={nextCursor} onFirst={() => set({})} onNext={(c) => set({ cursor: c })} />
-            </div>
-          );
-        }}
-      </QueryState>
-    </section>
-  );
-}
 
 function HelpChatPage() {
   const api = useApi();
@@ -242,7 +119,7 @@ function HelpChatPage() {
   return (
     <section className="max-w-[1600px] space-y-4">
       <DetailHeader
-        back={{ to: '/help-requests', label: h.back }}
+        back={{ to: '/consults', label: consultBack }}
         title={d ? `${label(helpCategoryName, d.category)} 도움요청` : h.chatTitle('')}
         badges={
           d && (
@@ -358,79 +235,17 @@ function HelpChatPage() {
 // ---------------- 라이더 문의
 
 type InquiryStatus = 'RECEIVED' | 'ANSWERED' | 'CLOSED';
-const INQUIRY_STATUSES = ['RECEIVED', 'ANSWERED', 'CLOSED'] as const;
 const INQUIRY_PAGE_SIZE = 50;
 
 export function InquiriesMenu() {
   return (
     <Routes>
-      <Route index element={<InquiryListPage />} />
+      <Route index element={<Navigate to="/consults" replace />} />
       <Route path=":inquiryId" element={<InquiryDetailPage />} />
     </Routes>
   );
 }
 
-function InquiryListPage() {
-  const api = useApi();
-  const navigate = useNavigate();
-  const [params, setParams] = useSearchParams();
-  const raw = params.get('status') ?? 'RECEIVED';
-  const status = (INQUIRY_STATUSES as readonly string[]).includes(raw) ? (raw as InquiryStatus) : 'RECEIVED';
-  const cursor = params.get('cursor') ?? '';
-  const list = useQuery({
-    queryKey: ['rider-inquiries', status, cursor],
-    queryFn: () => request('GET', api.cases.GET('/inquiries', { params: { query: { requesterType: 'RIDER', status, size: INQUIRY_PAGE_SIZE, ...(cursor ? { cursor } : {}) } } })),
-  });
-  const go = (inquiryId: string | undefined) => `/inquiries/${encodeURIComponent(inquiryId ?? '')}`;
-  return (
-    <section className="space-y-4">
-      <PageHeader title={q.title} description={q.intro} />
-      <StateTabs label={q.status} value={status} options={INQUIRY_STATUSES.map((s) => ({ value: s, label: q.statusName[s] }))} onChange={(s) => setParams({ status: s })} />
-      <QueryState state={toUiState(list, (x) => (x.items ?? []).length === 0)} onRetry={() => void list.refetch()} emptyText={q.empty}>
-        {(x) => {
-          const items = x.items ?? [];
-          const nextCursor = x.page?.nextCursor ?? null;
-          return (
-            <div className="space-y-3">
-              <ResultBar count={items.length} more={!!nextCursor} />
-              <DataTable>
-                <thead>
-                  <tr>
-                    <th>{q.col.title}</th>
-                    <th>{q.col.status}</th>
-                    <th>{q.col.category}</th>
-                    <th>{q.col.createdAt}</th>
-                    <th>{sm.inquiry.answeredAt}</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {items.map((it) => (
-                    <tr key={it.inquiryId} data-testid="inquiry-row" className="cursor-pointer" onClick={() => void navigate(go(it.inquiryId))}>
-                      {/* 문의 ID(시스템 ID)는 목록에 내지 않는다(ADR-0070) — 제목을 누르면 대화 */}
-                      <td className="font-medium">
-                        <Link className="hover:underline" to={go(it.inquiryId)} onClick={(e) => e.stopPropagation()}>
-                          {it.title ?? label(n.inquiryCategory, it.category)}
-                        </Link>
-                      </td>
-                      <td>
-                        <StatusBadge tone={inquiryTone(it.status)}>{label(q.statusName, it.status)}</StatusBadge>
-                      </td>
-                      <td className="whitespace-nowrap">{label(n.inquiryCategory, it.category)}</td>
-
-                      <td className="whitespace-nowrap">{when(it.createdAt)}</td>
-                      <td className="whitespace-nowrap">{when(it.answeredAt)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </DataTable>
-              <CursorPager hasPrev={!!cursor} nextCursor={nextCursor} onFirst={() => setParams({ status })} onNext={(c) => setParams({ status, cursor: c })} />
-            </div>
-          );
-        }}
-      </QueryState>
-    </section>
-  );
-}
 
 function InquiryDetailPage() {
   const api = useApi();
@@ -486,7 +301,7 @@ function InquiryDetailPage() {
   return (
     <section className="max-w-[1600px] space-y-4">
       <DetailHeader
-        back={{ to: '/inquiries', label: q.back }}
+        back={{ to: '/consults', label: consultBack }}
         title={d?.title ?? q.detailTitle('')}
         badges={
           d && (
@@ -596,11 +411,179 @@ function InquiryDetailPage() {
   );
 }
 
-const waitCol = '기다린 시간';
 
 /** 받은 뒤 지난 시간 — 10분 넘으면 주의, 30분 넘으면 경고 */
 function WaitBadge({ from, now }: { readonly from: string | null | undefined; readonly now: number | null }) {
   const w = waited(from, now);
   if (!w) return <span className="text-base-content/40">—</span>;
   return <StatusBadge tone={w.tone}>{w.text}</StatusBadge>;
+}
+
+// ---------------- 상담함(도움요청 + 라이더 문의 한 목록 — 사용자 2026-11-19 "라이더문의랑 도움요청이 둘 다 있는 이유가 뭐냐")
+
+const consultText = {
+  title: '상담함',
+  intro: '라이더가 보낸 배송 도움요청(급함)과 일반 문의를 한곳에서 봐요. 배송 도움요청이 먼저, 그 안에서는 오래 기다린 것부터. 누르면 대화를 열고, 끝나면 "상담 완료".',
+  tabs: { open: '상담 중', done: '끝남' },
+  kind: { help: '배송 도움요청', inquiry: '일반 문의' },
+  col: { kind: '구분', title: '내용', state: '상태', delivery: '배송', rider: '라이더', createdAt: '받은 때', wait: '기다린 시간' },
+  empty: { open: '상담할 건이 없어요.', done: '끝난 상담이 없어요.' },
+  partial: (what: string) => `${what} 목록을 불러오지 못했어요 — 아래는 일부예요.`,
+  retry: '다시 불러오기',
+} as const;
+
+type ConsultRow = {
+  readonly kind: 'help' | 'inquiry';
+  readonly key: string;
+  readonly to: string;
+  readonly title: string;
+  readonly state: ReactNode;
+  readonly deliveryId: string | null;
+  readonly riderId: string | null;
+  readonly createdAt: string | undefined;
+  readonly open: boolean;
+};
+
+export function ConsultsMenu() {
+  return (
+    <Routes>
+      <Route index element={<ConsultsPage />} />
+    </Routes>
+  );
+}
+
+function ConsultsPage() {
+  const api = useApi();
+  const navigate = useNavigate();
+  const [params, setParams] = useSearchParams();
+  const tab: 'open' | 'done' = params.get('tab') === 'done' ? 'done' : 'open';
+  const helpStates: readonly HelpState[] = tab === 'open' ? ['OPEN', 'IN_PROGRESS'] : ['RESOLVED'];
+  const inquiryStatuses: readonly InquiryStatus[] = tab === 'open' ? ['RECEIVED', 'ANSWERED'] : ['CLOSED'];
+  const help = useQuery({
+    queryKey: ['help-queue', 'consults', tab],
+    refetchInterval: 15_000,
+    queryFn: async () =>
+      (await Promise.all(helpStates.map((state) => request('GET', api.execution.GET('/delivery-help-requests', { params: { query: { size: HELP_PAGE_SIZE, state } } }))))).flatMap(
+        (r) => r.items ?? [],
+      ),
+  });
+  const inquiries = useQuery({
+    queryKey: ['rider-inquiries', 'consults', tab],
+    refetchInterval: 15_000,
+    queryFn: async () =>
+      (
+        await Promise.all(
+          inquiryStatuses.map((status) => request('GET', api.cases.GET('/inquiries', { params: { query: { requesterType: 'RIDER', status, size: INQUIRY_PAGE_SIZE } } }))),
+        )
+      ).flatMap((r) => r.items ?? []),
+  });
+  const riders = useRiderSummaries((help.data ?? []).map((it) => it.riderId));
+  const deliveryNos = useDeliveryNumbers([...(help.data ?? []).map((it) => it.deliveryId), ...(inquiries.data ?? []).map((it) => it.deliveryId ?? undefined)]);
+  const now = useNow();
+  const rows: ConsultRow[] = [
+    ...(help.data ?? []).map(
+      (it): ConsultRow => ({
+        kind: 'help',
+        key: `h:${it.deliveryId}:${it.requestId}`,
+        to: helpPath(it.deliveryId, it.requestId),
+        title: label(helpCategoryName, it.category),
+        state: <StatusBadge tone={helpTone(it.state)}>{label(n.helpState, it.state)}</StatusBadge>,
+        deliveryId: it.deliveryId ?? null,
+        riderId: it.riderId ?? null,
+        createdAt: it.createdAt,
+        open: it.state !== 'RESOLVED',
+      }),
+    ),
+    ...(inquiries.data ?? []).map(
+      (it): ConsultRow => ({
+        kind: 'inquiry',
+        key: `i:${it.inquiryId}`,
+        to: `/inquiries/${encodeURIComponent(it.inquiryId)}`,
+        title: it.title ?? label(n.inquiryCategory, it.category),
+        state: <StatusBadge tone={inquiryTone(it.status)}>{label(q.statusName, it.status)}</StatusBadge>,
+        deliveryId: it.deliveryId ?? null,
+        riderId: null,
+        createdAt: it.createdAt,
+        open: it.status !== 'CLOSED',
+      }),
+    ),
+  ].sort((a, b) => (a.kind === b.kind ? (a.createdAt ?? '').localeCompare(b.createdAt ?? '') * (tab === 'open' ? 1 : -1) : a.kind === 'help' ? -1 : 1));
+  // 둘 다 실패면 오류, 하나만 실패면 일부라고 알린다(빈 목록·0 으로 바꾸지 않는다)
+  const bothFailed = help.isError && inquiries.isError;
+  const loading = help.isPending || inquiries.isPending;
+  const partial = !bothFailed && (help.isError || inquiries.isError);
+  const retryAll = () => {
+    void help.refetch();
+    void inquiries.refetch();
+  };
+  return (
+    <section className="space-y-4">
+      <PageHeader title={consultText.title} description={consultText.intro} />
+      <StateTabs
+        label={consultText.title}
+        value={tab}
+        options={[
+          { value: 'open' as const, label: consultText.tabs.open },
+          { value: 'done' as const, label: consultText.tabs.done },
+        ]}
+        onChange={(t) => setParams(t === 'open' ? {} : { tab: t })}
+      />
+      {partial && (
+        <p role="alert" className="alert alert-warning text-sm" data-testid="consults-partial">
+          {consultText.partial(help.isError ? consultText.kind.help : consultText.kind.inquiry)}
+          <button type="button" className="btn btn-xs" onClick={retryAll}>
+            {consultText.retry}
+          </button>
+        </p>
+      )}
+      {bothFailed ? (
+        <p role="alert" className="alert alert-error text-sm">
+          {consultText.partial(`${consultText.kind.help}·${consultText.kind.inquiry}`)}
+          <button type="button" className="btn btn-xs" onClick={retryAll}>
+            {consultText.retry}
+          </button>
+        </p>
+      ) : loading ? (
+        <span className="loading loading-spinner" aria-label="불러오는 중" />
+      ) : rows.length === 0 ? (
+        <p className="rounded-box bg-base-100 px-4 py-10 text-center text-sm text-base-content/60">{consultText.empty[tab]}</p>
+      ) : (
+        <div className="space-y-3">
+          <ResultBar count={rows.length} more={false} extra={<span className="text-xs text-base-content/50">{sm.autoRefresh(15)}</span>} />
+          <DataTable>
+            <thead>
+              <tr>
+                <th>{consultText.col.kind}</th>
+                <th>{consultText.col.title}</th>
+                <th>{consultText.col.state}</th>
+                <th>{consultText.col.delivery}</th>
+                <th>{consultText.col.rider}</th>
+                <th>{consultText.col.createdAt}</th>
+                <th>{consultText.col.wait}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r) => (
+                <tr key={r.key} data-testid="consult-row" data-kind={r.kind} className="cursor-pointer" onClick={() => void navigate(r.to)}>
+                  <td className="whitespace-nowrap">
+                    <StatusBadge tone={r.kind === 'help' ? 'warning' : 'ghost'}>{consultText.kind[r.kind]}</StatusBadge>
+                  </td>
+                  <td className="font-semibold">
+                    <Link className="hover:underline" to={r.to} onClick={(e) => e.stopPropagation()}>
+                      {r.title}
+                    </Link>
+                  </td>
+                  <td>{r.state}</td>
+                  <td>{r.deliveryId ? <DeliveryRef deliveryId={r.deliveryId} numbers={deliveryNos.get(r.deliveryId)} /> : none}</td>
+                  <td>{r.riderId ? <RiderName riderId={r.riderId} nameMasked={riders.get(r.riderId)?.nameMasked} riderNumber={riders.get(r.riderId)?.riderNumber} /> : none}</td>
+                  <td className="whitespace-nowrap">{when(r.createdAt)}</td>
+                  <td className="whitespace-nowrap">{r.open ? <WaitBadge from={r.createdAt} now={now} /> : none}</td>
+                </tr>
+              ))}
+            </tbody>
+          </DataTable>
+        </div>
+      )}
+    </section>
+  );
 }

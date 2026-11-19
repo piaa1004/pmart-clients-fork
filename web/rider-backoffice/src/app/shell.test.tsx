@@ -9,12 +9,12 @@ describe('화면 틀', () => {
   it('메뉴를 접으면 아이콘만(묶음 이름은 링크 이름으로), 다시 펼칠 수 있다', async () => {
     renderAt('/dashboard', as.riderOps);
     const nav = await screen.findByRole('navigation', { name: '메뉴' });
-    expect(within(nav).getByRole('link', { name: '도움요청' })).toBeInTheDocument();
+    expect(within(nav).getByRole('link', { name: '상담함' })).toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: '메뉴 접기' }));
-    expect(within(nav).queryByRole('link', { name: '도움요청' })).not.toBeInTheDocument();
-    expect(within(nav).getByRole('link', { name: '지원센터' })).toHaveAttribute('href', '/cases');
+    expect(within(nav).queryByRole('link', { name: '상담함' })).not.toBeInTheDocument();
+    expect(within(nav).getByRole('link', { name: '지원센터' })).toHaveAttribute('href', '/consults');
     await userEvent.click(screen.getByRole('button', { name: '메뉴 펼치기' }));
-    expect(within(nav).getByRole('link', { name: '도움요청' })).toBeInTheDocument();
+    expect(within(nav).getByRole('link', { name: '상담함' })).toBeInTheDocument();
   });
 
   it('머리줄 통합 찾기: 라이더 번호 6자리면 그 라이더를 관제에서 연다', async () => {

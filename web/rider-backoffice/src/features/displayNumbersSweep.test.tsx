@@ -41,12 +41,12 @@ describe('화면 번호 — 시스템 ID 는 겉에 없다', () => {
   });
 
   it('없는 라이더 번호면 서버에 묻지 않고 "없어요"', async () => {
-    const view = renderAt('/help-requests', as.riderOps);
-    await screen.findAllByTestId('help-row');
-    const before = view.sent.filter((r) => new URL(r.url).pathname.endsWith('/delivery-help-requests')).length;
-    await userEvent.type(screen.getByLabelText('라이더'), '000000');
-    await userEvent.click(screen.getByRole('button', { name: '조회' }));
+    const view = renderAt('/surcharges', as.riderOps);
+    await screen.findAllByTestId('surcharge-row');
+    const before = view.sent.filter((r) => new URL(r.url).pathname.endsWith('/surcharge-requests')).length;
+    await userEvent.type(screen.getByLabelText('라이더 번호 6자리(또는 라이더 ID)'), '000000');
+    await userEvent.click(screen.getByRole('button', { name: '찾기' }));
     expect(await screen.findByText(/없어요/)).toBeInTheDocument();
-    expect(view.sent.filter((r) => new URL(r.url).pathname.endsWith('/delivery-help-requests')).length).toBe(before);
+    expect(view.sent.filter((r) => new URL(r.url).pathname.endsWith('/surcharge-requests')).length).toBe(before);
   });
 });

@@ -123,11 +123,21 @@ describe('메뉴 자리', () => {
     const nav = await screen.findByRole('navigation', { name: '메뉴' });
     for (const g of ['현황', '관제', '배송·배차', '지원센터', '수행료']) expect(within(nav).getByText(g)).toBeInTheDocument();
     expect(screen.getAllByText('라이더').length).toBeGreaterThan(0);
-    for (const name of ['대시보드', '라이더 관제', '라이더 찾기', '가입 승인', '제한 검토', '배송 찾기', '접수 건', '도움요청', '라이더 문의', '수행료 조정', '추가 배달료']) {
+    for (const name of ['대시보드', '라이더 관제', '라이더 찾기', '가입 승인', '제한 검토', '배송 찾기', '상담함', '접수 건', '수행료 조정', '추가 배달료']) {
       await userEvent.click(screen.getByRole('link', { name }));
       expect(await screen.findByRole('heading', { name })).toBeInTheDocument();
       expect(screen.queryByText('화면 준비 중')).not.toBeInTheDocument();
     }
     expect(allMenus.every((menu) => menu.ready)).toBe(true);
+  });
+});
+
+describe('지원센터 메뉴 정리(사용자 2026-11-19 "라이더문의랑 도움요청이 둘 다 있는 이유")', () => {
+  it('도움요청·라이더 문의 메뉴는 없고 상담함 하나 — 옛 목록 주소는 상담함으로', async () => {
+    renderAt('/help-requests', as.riderOps);
+    expect(await screen.findByRole('heading', { name: '상담함' })).toBeInTheDocument();
+    const nav = screen.getByRole('navigation', { name: '메뉴' });
+    expect(within(nav).queryByRole('link', { name: '도움요청' })).not.toBeInTheDocument();
+    expect(within(nav).queryByRole('link', { name: '라이더 문의' })).not.toBeInTheDocument();
   });
 });

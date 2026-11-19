@@ -15,7 +15,7 @@ import { AppealsMenu } from '../features/support/AppealPages';
 import { NoticesMenu } from '../features/ops/NoticePages';
 import { StaffActionsMenu } from '../features/ops/StaffActionsPage';
 import { RestrictionReviewsMenu, RidersMenu, SignupsMenu } from '../features/riders/RiderPages';
-import { HelpRequestsMenu, InquiriesMenu } from '../features/support/SupportPages';
+import { ConsultsMenu, HelpRequestsMenu, InquiriesMenu } from '../features/support/SupportPages';
 import { DeliveriesMenu } from '../features/deliveries/DeliveryPages';
 import { PreparingPage } from '../features/menus/PreparingPage';
 import { LoginCallbackPage, LoginPage } from '../features/session/LoginPage';
@@ -228,6 +228,8 @@ function MenuPage({ menu }: { readonly menu: MenuItem }) {
       return <SignupsMenu />;
     case 'restrictionReviews':
       return <RestrictionReviewsMenu />;
+    case 'consults':
+      return <ConsultsMenu />;
     case 'helpRequests':
       return <HelpRequestsMenu />;
     case 'inquiries':

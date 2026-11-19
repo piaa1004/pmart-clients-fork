@@ -15,6 +15,8 @@ export interface MenuItem {
   readonly apiReady: readonly string[];
   /** 서버 API 가 아직 없거나 계약만 있는 기능 */
   readonly apiMissing: readonly string[];
+  /** 메뉴 목록에는 안 보이고 주소로만 연다(상세 화면이 있는 옛 목록 — 2026-11-19 상담함으로 합침) */
+  readonly hidden?: boolean;
   /** 관리자(OPERATOR_ADMIN)에게만 메뉴에 보인다(판정은 서버 — 다른 역할은 403) */
   readonly adminOnly?: boolean;
 }
@@ -32,11 +34,12 @@ export const navGroups: readonly MenuGroup[] = [
   { key: 'control', items: [done('riderMap', 'control')] },
   { key: 'riders', items: [done('riders', 'riders'), done('signups', 'signups'), done('restrictionReviews', 'restriction-reviews')] },
   { key: 'deliveries', items: [done('deliveries', 'deliveries')] },
-  { key: 'support', items: [done('cases', 'cases'), done('helpRequests', 'help-requests'), done('inquiries', 'inquiries'), done('appeals', 'appeals')] },
+  // 2026-11-19: 사용자 "라이더문의랑 도움요청이 둘 다 있는 이유" — 상담함 하나로. 옛 두 목록은 상세 주소만 남긴다(hidden). 접수 건은 운영으로.
+  { key: 'support', items: [done('consults', 'consults'), { ...done('helpRequests', 'help-requests'), hidden: true }, { ...done('inquiries', 'inquiries'), hidden: true }, done('appeals', 'appeals')] },
   // 2026-11-19: 지급 관리(execution 0.29.0)·소명·이의(rider 0.15.0)
   { key: 'earnings', items: [done('adjustments', 'adjustments'), done('surcharges', 'surcharges'), done('payouts', 'payouts')] },
   // 2026-11-18(PC 5, 백엔드 notification 0.5.0·rider 0.14.0·execution 0.28.0·dispatch 0.11.0): 라이더 공지·직원 조치 이력(관리자만).
-  { key: 'ops', items: [done('notices', 'notices'), { ...done('staffActions', 'staff-actions'), adminOnly: true }] },
+  { key: 'ops', items: [done('cases', 'cases'), done('notices', 'notices'), { ...done('staffActions', 'staff-actions'), adminOnly: true }] },
 ];
 export const allMenus: readonly MenuItem[] = navGroups.flatMap((g) => g.items);
 
@@ -52,5 +55,5 @@ export const isOperatorAdmin = (roles: readonly string[]) => roles.includes('OPE
 /** 이 직원에게 보일 메뉴 묶음(관리자 전용 메뉴는 관리자에게만 — 비면 묶음도 뺀다) */
 export const visibleGroups = (roles: readonly string[]): readonly MenuGroup[] =>
   navGroups
-    .map((g) => ({ ...g, items: g.items.filter((i) => !i.adminOnly || isOperatorAdmin(roles)) }))
+    .map((g) => ({ ...g, items: g.items.filter((i) => !i.hidden && (!i.adminOnly || isOperatorAdmin(roles))) }))
     .filter((g) => g.items.length > 0);

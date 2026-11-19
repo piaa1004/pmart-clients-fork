@@ -31,6 +31,7 @@ export const messages = {
     signups: '가입 승인',
     restrictionReviews: '제한 검토',
     deliveries: '배송 찾기',
+    consults: '상담함',
     cases: '접수 건',
     helpRequests: '도움요청',
     inquiries: '라이더 문의',
