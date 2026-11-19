@@ -90,3 +90,16 @@ describe('상담함 — 배송 도움요청과 일반 문의를 한 목록에(�
     expect(within(inquiry).getByRole('link')).toHaveAttribute('href', expect.stringMatching(/^\/inquiries\//));
   });
 });
+
+describe('상담 화면에서 바로 배송 조치(사용자 2026-11-19 "배송찾기에서 운영조치로 해줘야 하게 불편하게")', () => {
+  it('전달 불가 신고가 들어온 배송은 상담 화면에서 반려할 수 있다 — 배송 상세와 같은 요청', async () => {
+    const view = renderAt('/help-requests/DLV-1/HR-1', as.riderOps);
+    const form = await screen.findByRole('form', { name: '전달 실패 확정·반려' });
+    await userEvent.click(within(form).getByLabelText('반려'));
+    await userEvent.click(within(form).getByRole('button', { name: '보내기' }));
+    expect(await within(form).findByTestId('action-result')).toHaveTextContent('반영했어요.');
+    const post = sentTo(view.sent, '/failure-decisions')[0]!;
+    expect(post.headers.get('Idempotency-Key')).toBeTruthy();
+    expect(((await post.clone().json()) as { decision: string }).decision).toBe('REJECT');
+  });
+});

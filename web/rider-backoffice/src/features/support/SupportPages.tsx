@@ -18,6 +18,7 @@ import { messages } from '../../shared/messages';
 import { ops } from '../../shared/opsMessages';
 import { label, none, when } from '../../shared/opsUi';
 import { useNow, waited } from '../../shared/useNow';
+import { DeliveryActions } from '../deliveries/DeliveryActions';
 import { EvidencePhotos, helpExtrasMessages, InquiryPhotos, MaskMessage, ResolvePanel } from './HelpExtras';
 import { ChatBox, ChatBubble, helpTone, inquiryTone, StateTabs } from './supportUi';
 
@@ -36,6 +37,8 @@ const sm = {
     request: '요청 내용',
     photos: '사진',
     chat: '대화',
+    actions: '배송 조치',
+    actionsHint: '지금 배송 상태에서 할 수 있는 조치만 보여요',
     resolve: '처리',
     riderSaid: '라이더가 쓴 내용',
     lastRider: '라이더 마지막 말',
@@ -115,6 +118,7 @@ function HelpChatPage() {
     { id: 'sec-request', label: sm.help.request },
     { id: 'sec-photos', label: sm.help.photos },
     { id: 'sec-chat', label: sm.help.chat },
+    { id: 'sec-actions', label: sm.help.actions },
   ];
   return (
     <section className="max-w-[1600px] space-y-4">
@@ -187,6 +191,7 @@ function HelpChatPage() {
             </>
           )}
         </div>
+        <div className="space-y-4">
         <Section id="sec-chat" title={sm.help.chat} aside={<span className="text-xs text-base-content/50">{sm.autoRefresh(4)}</span>}>
           <div className="space-y-3">
             <QueryState state={toUiState(chat)} onRetry={() => void chat.refetch()}>
@@ -227,6 +232,11 @@ function HelpChatPage() {
             <CommandFeedback command={send}>{() => <span className="text-xs text-success">{h.sent}</span>}</CommandFeedback>
           </div>
         </Section>
+        {/* 상담하면서 바로 배송 조치(상태 정정·전달 실패 확정·반려·배차 취소) — 배송 찾기로 가지 않아도 된다(사용자 2026-11-19) */}
+        <Section id="sec-actions" title={sm.help.actions} aside={<span className="text-xs text-base-content/50">{sm.help.actionsHint}</span>}>
+          <HelpDeliveryActions deliveryId={deliveryId} />
+        </Section>
+        </div>
       </div>
     </section>
   );
@@ -585,5 +595,28 @@ function ConsultsPage() {
         </div>
       )}
     </section>
+  );
+}
+
+/**
+ * 상담 화면의 배송 조치 — 배송 상세의 "운영 조치"와 같은 양식(상태 정정·전달 실패 확정·반려·배차 취소).
+ * 같은 조회 키를 써서 배송 상세와 캐시를 나눈다. 조치는 서버가 권한·상태를 판정한다.
+ */
+function HelpDeliveryActions({ deliveryId }: { readonly deliveryId: string }) {
+  const api = useApi();
+  const execution = useQuery({
+    queryKey: ['delivery', deliveryId],
+    refetchInterval: 10_000,
+    queryFn: () => request('GET', api.execution.GET('/deliveries/{deliveryId}', { params: { path: { deliveryId } } })),
+  });
+  const dispatch = useQuery({
+    queryKey: ['delivery-dispatch', deliveryId],
+    refetchInterval: 10_000,
+    queryFn: () => request('GET', api.dispatch.GET('/deliveries/{deliveryId}/dispatch', { params: { path: { deliveryId } } })),
+  });
+  return (
+    <QueryState state={toUiState(execution)} onRetry={() => void execution.refetch()}>
+      {(d) => <DeliveryActions delivery={d} dispatch={dispatch.data} />}
+    </QueryState>
   );
 }
