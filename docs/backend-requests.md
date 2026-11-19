@@ -71,8 +71,9 @@
 | BR-61 | 높음 | 고객 | 고객 주문 조회 `GET /orders/{orderId}` 의 `shipments` 가 늘 빈 배열(`OrdersController` `.shipments(List.of())`) — 고객이 배송 ID 를 알 길이 없어 배송 현황·라이더 지도를 열 수 없음 | OPEN(급함, 요청 `docs/handoff/customer-app/2026-11-19-backend-order-shipments-empty.md` + 묶음 요청 `…/2026-11-19-backend-delivery-status-screen.md` R1) — 이것 때문에 라이더가 지도에 안 뜸 |
 | BR-62 | 중간 | 고객 | 배송 현황 시트의 주문한 센터 이름 — 고객용 센터 이름 경로가 없어 브랜드만 보임(`Order.mfcId` 만) | **RESOLVED**(회신 `clients/customer-app/2026-11-19-reply-br61-br62-shipments-center-name.md`, order 0.15.0 `mfcName` — LAN 배포 전, 앱 반영 `61079e5`). 원 OPEN(요청 `docs/handoff/customer-app/2026-11-19-backend-delivery-status-screen.md` R2 — 주문 응답 `mfcName` 제안) |
 | BR-63 | 중간 | 고객 | 홈 진열·상품 상세 응답의 `rating`·`reviewCount` 가 null — 같은 상품 rating-summary·리뷰 요약은 480개 | OPEN(요청 `docs/handoff/customer-app/2026-11-19-backend-rating-null-in-cards.md`). 상세는 앱이 rating-summary 로 보임, 카드는 서버 반영 대기 |
-| BR-64 | 높음 | 고객 | 가입 즉시 휴대폰 본인 인증(옥토모)·한 번호 한 계정·같은 번호 기존 계정 안내(제공자·가입일·가린 이메일)·탈퇴 1달 재가입 금지 — 인증 상태·API·결과 코드 없음 | OPEN(요청 `docs/handoff/customer-app/2026-11-19-backend-social-login-identity.md` R1~R7, 옥토모 방식은 사용자가 연결 뒤 알림) |
+| BR-64 | 높음 | 고객 | 가입 즉시 휴대폰 본인 인증(옥토모)·한 번호 한 계정·같은 번호 기존 계정 안내(제공자·가입일·가린 이메일)·탈퇴 1달 재가입 금지 — 인증 상태·API·결과 코드 없음 | 일부 — customer 0.9.0 휴대폰 번호 확인(OCTOMO, 회원 스스로) 배포·고객앱 화면 반영. 가입 단계·한 번호 한 계정·기존 계정 안내·탈퇴 1달은 OPEN(요청 `docs/handoff/customer-app/2026-11-19-backend-phone-verification-signup.md` R1~R7, 원 요청 `…-social-login-identity.md`) |
 | BR-65 | 높음 | 고객 | 카카오·네이버 로그인 — auth-service 가 Google 만 검증(501) | OPEN(같은 요청서 BR-65 — 카카오 OIDC ID 토큰, 네이버 Android SDK 액세스 토큰 + 서버 `/v1/nid/me` 확인(콘솔은 Android 만). 앱 SDK 2종 승인됨 2026-11-19, 카카오 콘솔 로그인·OIDC 활성화됨) |
+| BR-66 | 높음 | 고객 | 네이버 로그인 콜백 중계 — 네이버 콘솔이 앱 주소(`com.pmart.customer://oauth/naver`)를 받지 않고 도메인 없음 → LAN 게이트웨이 공개 경로가 받은 쿼리를 앱 주소로 302(고정 목적지, 저장·기록 없음) | OPEN(요청 `docs/handoff/customer-app/2026-11-19-backend-naver-oauth-callback-relay.md` R1~R5) |
 
 ---
 
@@ -459,3 +460,4 @@
 
 ## BR-65 카카오·네이버 로그인 (고객앱)
 - auth-service 가 Google 만 검증. 카카오 = OIDC ID 토큰 검증, 네이버 = Android SDK 액세스 토큰을 서버가 `/v1/nid/me` 로 확인(사용자 2026-11-19 — 고객앱은 Android 만, PC 웹·Callback·서버 코드 교환 없음). 앱 `kakao_flutter_sdk_user`·`flutter_naver_login` 추가는 사용자 승인 대기.
+- 2026-11-19 진행: 백엔드가 customer 0.9.0 휴대폰 번호 확인(OCTOMO — 고객이 대표번호로 숫자 문자, "보냈어요" 때만 확인)을 만들고 배포. 고객앱 `/me/phone-verification`(레퍼런스 13 모양) 반영. 남은 BR-64(가입 단계·중복 안내·탈퇴 1달·기존 회원) 요청서 `docs/handoff/customer-app/2026-11-19-backend-phone-verification-signup.md`.

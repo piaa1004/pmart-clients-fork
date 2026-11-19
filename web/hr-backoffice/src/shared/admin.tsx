@@ -7,8 +7,10 @@
 // - 결과 줄: "N건" + 최신순/과거순 토글
 // - 표: 회색 머리줄, 줄 전체 누르면 상세
 // - 상세: 제목·표시·요약 + 오른쪽 동작 버튼, 그 아래 구역 상자(제목 줄 + 항목명/값 줄), 구역으로 가는 밑줄 탭
+// 목록 부품 SearchPanel·StatStrip 는 공용(@pmart/web-ui listParts, 2026-11-19)으로 옮김 — 이 파일에서 그대로 가져다 쓰게 다시 내보낸다
+export { SearchPanel, StatStrip } from '@pmart/web-ui';
 import { useStatChange } from './motion';
-import type { FormEvent, ReactNode } from 'react';
+import type { ReactNode } from 'react';
 import { Link, useNavigate } from 'react-router';
 
 export type Tone = 'neutral' | 'info' | 'success' | 'warning' | 'error' | 'accent' | 'ghost';
@@ -83,23 +85,6 @@ export function PageHeader({ title, description, actions, back }: { readonly tit
   );
 }
 
-/** 검색 조건 — 목록 카드 맨 위 필터 줄(2026-11-18 Shopify·Medusa 목록처럼: 항목명은 칸 위에 작게, 버튼은 오른쪽).
- * 바로 뒤의 결과 줄(ResultBar)·표(DataTable)와 한 카드로 붙는다(index.css 의 data-list-part). */
-export function SearchPanel({ onSubmit, onReset, children, submitLabel = '조회', resetLabel = '초기화', submitDisabled = false, label = '검색 조건' }: { readonly onSubmit: (e: FormEvent) => void; readonly onReset: () => void; readonly children: ReactNode; readonly submitLabel?: string; readonly resetLabel?: string; readonly submitDisabled?: boolean; readonly label?: string }) {
-  return (
-    <form className="flex flex-wrap items-end gap-x-5 gap-y-3 rounded-box border border-base-300 bg-base-100 px-4 py-3.5 shadow-sm" onSubmit={onSubmit} aria-label={label} data-list-part="top">
-      {children}
-      <div className="ml-auto flex gap-2">
-        <button type="button" className="btn btn-sm btn-ghost" onClick={onReset}>
-          {resetLabel}
-        </button>
-        <button type="submit" className="btn btn-sm btn-primary min-w-20" disabled={submitDisabled}>
-          {submitLabel}
-        </button>
-      </div>
-    </form>
-  );
-}
 
 /** 검색 조건 한 줄 */
 export function SearchRow({ label, children }: { readonly label: ReactNode; readonly children: ReactNode }) {
@@ -278,14 +263,6 @@ export function StatCard({ label, value, hint, to, tone, testId, active = false 
   );
 }
 
-/** 숫자 띠(목록 맨 위 카드 한 줄, 2026-11-19 관제 형식) */
-export function StatStrip({ children, label, testId }: { readonly children: ReactNode; readonly label: string; readonly testId?: string }) {
-  return (
-    <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5" role="group" aria-label={label} data-testid={testId}>
-      {children}
-    </div>
-  );
-}
 
 /** 숫자 칸 글자 — 서버 개수(50 넘으면 "N+"), 읽는 중 "…", 못 읽음 "?"(0 이 아님) */
 export const countCell = (q: { readonly data?: { readonly n: number; readonly more: boolean } | undefined; readonly isError: boolean }): string => (q.data ? `${q.data.n}${q.data.more ? '+' : ''}` : q.isError ? '?' : '…');

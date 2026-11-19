@@ -395,6 +395,25 @@ void main() {
     await t.tap(find.byKey(const ValueKey('address-search')));
     await t.pumpAndSettle();
     await shot('address-new');
+    // 휴대폰 번호 확인(OCTOMO) — 레퍼런스 13 연령확인 모양. 문자 보내기 단계는 남은 시간이 1초마다 바뀌어
+    // pumpAndSettle 대신 짧게 그린다.
+    Future<void> shotNow(String name) async {
+      for (var i = 0; i < 10; i++) {
+        await t.pump(const Duration(milliseconds: 60));
+      }
+      n += 1;
+      final file = File('$_dir/${n.toString().padLeft(2, '0')}-$name.png');
+      await expectLater(find.byType(CustomerApp), matchesGoldenFile(file.uri));
+    }
+
+    await go('/me/phone-verification');
+    await shot('phone-verify-input');
+    await t.tap(find.byKey(const ValueKey('pv-next')));
+    await shotNow('phone-verify-send');
+    await t.tap(find.byKey(const ValueKey('pv-sent')));
+    await shotNow('phone-verify-done');
+    await t.tap(find.byKey(const ValueKey('pv-done')));
+    await t.pumpAndSettle();
     await go('/notifications/settings');
     await shot('notice-settings');
     await go('/notifications');

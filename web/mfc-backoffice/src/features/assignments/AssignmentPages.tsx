@@ -18,6 +18,7 @@ import { messages } from '../../shared/messages';
 import { SystemNumbers } from '../../shared/displayNumber';
 import { Who } from '../../shared/OperatorLabel';
 import { PlanList } from '../lists/CenterLists';
+import { StartWork, UnassignedTasks } from './StartWork';
 
 const m = messages.assignments;
 const taskName = messages.workers.task;
@@ -42,7 +43,7 @@ const STATES: readonly AssignmentState[] = ['ACTIVE', 'SUPERSEDED', 'RELEASED'];
 const TASK_TYPES: readonly TaskType[] = ['PICK', 'PACK', 'RETURN', 'DISPATCH', 'RECEIVE', 'INSPECT', 'PUTAWAY', 'REPLENISH', 'MOVE'];
 const isState = (v: string | null): v is AssignmentState => !!v && (STATES as readonly string[]).includes(v);
 const isTaskType = (v: string | null): v is TaskType => !!v && (TASK_TYPES as readonly string[]).includes(v);
-type Tab = 'list' | 'manual' | 'plan';
+type Tab = 'list' | 'unassigned' | 'manual' | 'plan';
 
 const assignmentsPath = (mfcId: string, rest = '') => centerPath(mfcId, rest ? `assignments/${rest}` : 'assignments');
 
@@ -59,14 +60,16 @@ export function AssignmentsMenu({ mfcId }: { readonly mfcId: string }) {
 function AssignmentsHome({ mfcId }: { readonly mfcId: string }) {
   const [params, setParams] = useSearchParams();
   const raw = params.get('tab');
-  const tab: Tab = raw === 'manual' || raw === 'plan' ? raw : 'list';
+  const tab: Tab = raw === 'manual' || raw === 'plan' || raw === 'unassigned' ? raw : 'list';
   const go = (next: Tab, extra: Record<string, string> = {}) => setParams(new URLSearchParams({ ...(next === 'list' ? {} : { tab: next }), ...extra }), { replace: true });
   return (
     <section className="space-y-4">
-      <h1 className="text-xl font-bold">{messages.menus.assignments}</h1>
+      <h1>{messages.menus.assignments}</h1>
       <p className="text-sm opacity-70">{m.intro}</p>
+      {/* 작업 시작(capacity 0.22.0) — 누르면 추천대로 바로 배정. 바꾸기는 아래 목록·담당 없는 작업·직접 배정에서 */}
+      <StartWork mfcId={mfcId} />
       <div role="tablist" className="tabs tabs-box w-fit">
-        {(['list', 'manual', 'plan'] as const).map((t) => (
+        {(['list', 'unassigned', 'manual', 'plan'] as const).map((t) => (
           <button key={t} type="button" role="tab" aria-selected={tab === t} className={`tab ${tab === t ? 'tab-active' : ''}`} onClick={() => go(t)}>
             {m.tabs[t]}
           </button>
@@ -74,6 +77,7 @@ function AssignmentsHome({ mfcId }: { readonly mfcId: string }) {
       </div>
       {tab === 'list' && <AssignmentList mfcId={mfcId} onReassign={(a) => go('manual', { taskId: a.taskId ?? '', taskType: a.taskType ?? '' })} />}
       {tab === 'manual' && <ManualAssign key={`${params.get('taskId') ?? ''}`} mfcId={mfcId} initialTaskId={params.get('taskId') ?? ''} initialTaskType={params.get('taskType')} />}
+      {tab === 'unassigned' && <UnassignedTasks mfcId={mfcId} />}
       {tab === 'plan' && <PlanStart mfcId={mfcId} />}
     </section>
   );
@@ -321,42 +325,13 @@ function ManualAssign({ mfcId, initialTaskId, initialTaskType }: { readonly mfcI
 
 // ---------------------------------------------------------------- 추천
 
+/** 지난 작업 시작(추천) 목록 — 사용자 결정 2026-11-19 로 "추천만 계산" 화면은 두지 않는다(작업 시작은 위 단추). 지난 것은 보기만 */
 function PlanStart({ mfcId }: { readonly mfcId: string }) {
-  const api = useApi();
   const navigate = useNavigate();
-  const [horizon, setHorizon] = useState('60');
   const [planId, setPlanId] = useState('');
-  const minutes = Number(horizon);
-  const valid = Number.isInteger(minutes) && minutes >= 10 && minutes <= 480;
-  const calc = useCommand(async (_: null, key) => {
-    const plan = await request('POST', api.capacity.POST('/assignment-plans', { ...commandParams(key), body: { mfcId, horizonMinutes: minutes } }));
-    if (plan.planId) void navigate(assignmentsPath(mfcId, `plans/${encodeURIComponent(plan.planId)}`));
-    return plan;
-  });
   return (
     <div className="max-w-3xl space-y-3">
-      <form
-        className="space-y-2 rounded-box bg-base-100 p-4 text-sm"
-        aria-label={m.calculate}
-        onSubmit={(e) => {
-          e.preventDefault();
-          if (!valid) return;
-          if (calc.phase.kind === 'rejected' || calc.phase.kind === 'done') calc.reset();
-          void calc.run(null);
-        }}
-      >
-        <p className="text-xs opacity-70">{m.planHint}</p>
-        <div className="flex flex-wrap items-end gap-2">
-          <label className="flex flex-col gap-1">
-            {m.horizon}
-            <input className="input input-sm w-28" type="number" min={10} max={480} step={1} value={horizon} onChange={(e) => setHorizon(e.target.value)} />
-          </label>
-          <button type="submit" className="btn btn-sm btn-primary" disabled={!valid || calc.busy}>
-            {m.calculate}
-          </button>
-        </div>
-        <CommandFeedback command={calc} />
-      </form>
+      <PlanList mfcId={mfcId} />
       <form
         className="flex flex-wrap items-end gap-2 rounded-box bg-base-100 p-4 text-sm"
         aria-label={m.openPlan}
@@ -373,7 +348,6 @@ function PlanStart({ mfcId }: { readonly mfcId: string }) {
           {m.openPlan}
         </button>
       </form>
-      <PlanList mfcId={mfcId} />
     </div>
   );
 }
@@ -421,7 +395,7 @@ function PlanView({ mfcId, plan }: { readonly mfcId: string; readonly plan: Plan
     <>
       <h1 className="flex flex-wrap items-center gap-2 text-xl font-bold">
         {/* 화면 표기 = 종류 · 시각(ADR-0070 덧붙임) — 계획 ID 는 아래 시스템 번호 칸 */}
-        {`${m.tabs.plan} · ${plan.createdAt ? formatSeoul(plan.createdAt) : messages.none}`}
+        {`${m.planLabel} · ${plan.createdAt ? formatSeoul(plan.createdAt) : messages.none}`}
         <span className={`badge badge-sm ${plan.state === 'PROPOSED' ? 'badge-info' : plan.state === 'COMMITTED' ? 'badge-success' : 'badge-warning'}`}>
           {m.planState[plan.state ?? ''] ?? plan.state}
         </span>

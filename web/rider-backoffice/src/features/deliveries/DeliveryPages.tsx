@@ -140,9 +140,9 @@ function DeliverySearchPage() {
     <section className="space-y-4">
       <PageHeader title={m.title} description={m.intro} actions={<SavedViews listKey="deliveries" />} />
       <StatStrip label={dx.stripLabel} testId="delivery-strip">
-        <StatCard label={dx.inProgressAll} value={statText(inProgress ? Object.values(inProgress).reduce((a, b) => a + b, 0) : undefined, stats.isError)} to="/deliveries" active={!state} testId="strip-all" />
+        <StatCard layout="row" label={dx.inProgressAll} value={statText(inProgress ? Object.values(inProgress).reduce((a, b) => a + b, 0) : undefined, stats.isError)} to="/deliveries" active={!state} testId="strip-all" />
         {(stats.isError || !inProgress ? (['UNASSIGNED', 'FAILURE_REPORTED'] as const) : liveStates).map((s) => (
-          <StatCard
+          <StatCard layout="row"
             key={s}
             label={dx.stateCard(name(n.executionState, s))}
             value={statText(inProgress?.[s], stats.isError)}
@@ -152,9 +152,21 @@ function DeliverySearchPage() {
             testId={`strip-${s}`}
           />
         ))}
-        <StatCard label={dx.failedToday} value={statText(stats.data?.failedToday, stats.isError)} tone={(stats.data?.failedToday ?? 0) > 0 ? 'error' : undefined} hint={dx.today} testId="strip-failed-today" />
+        <StatCard layout="row" label={dx.failedToday} value={statText(stats.data?.failedToday, stats.isError)} tone={(stats.data?.failedToday ?? 0) > 0 ? 'error' : undefined} hint={dx.today} testId="strip-failed-today" />
       </StatStrip>
-      <SearchPanel onSubmit={submit} onReset={reset} submitLabel={m.search} resetLabel={m.reset}>
+      {/* 검색 조건 칩으로 접기(2026-11-19 통합 백오피스처럼) — 시스템 ID 조건은 "한 주문/한 라이더" */}
+      <SearchPanel
+        onSubmit={submit}
+        onReset={reset}
+        submitLabel={m.search}
+        resetLabel={m.reset}
+        summary={[
+          ['주문', orderNumber || (orderId ? '한 주문' : '')],
+          ['라이더', riderId ? (/^\d{6}$/.test(riderId) ? riderId : '한 라이더') : ''],
+          [m.state, state ? name(n.executionState, state) : ''],
+          [m.type, type ? name(n.deliveryType, type) : ''],
+        ]}
+      >
         <SearchRow label="번호로 찾기">
           <label className="flex items-center gap-2 text-sm">
             <span className="text-base-content/60">{ops.actions.orderNumber}</span>

@@ -47,10 +47,11 @@ android {
         versionCode = flutter.versionCode
         versionName = flutter.versionName
         // 소셜 로그인 키는 빌드 때 `--dart-define-from-file=.secrets/customer.env` 로만 들어온다(저장소에 넣지 않음).
-        // 카카오: 로그인 뒤 돌아오는 주소 kakao{앱 키}://oauth, 네이버: SDK 가 매니페스트 meta-data 로 읽는다.
+        // 카카오: 로그인 뒤 돌아오는 주소 kakao{앱 키}://oauth.
         manifestPlaceholders["kakaoNativeAppKey"] = dartDefines["KAKAO_NATIVE_APP_KEY"] ?: ""
-        manifestPlaceholders["naverClientId"] = dartDefines["NAVER_CLIENT_ID"] ?: ""
-        manifestPlaceholders["naverClientSecret"] = dartDefines["NAVER_CLIENT_SECRET"] ?: ""
+        // 네이버 OIDC(flutter_appauth): 로그인 뒤 돌아오는 주소 com.pmart.customer://oauth/naver 의 scheme.
+        // scheme 에 밑줄을 못 써 패키지명과 다르다. 코드의 naverRedirectUrl 과 같아야 한다.
+        manifestPlaceholders["appAuthRedirectScheme"] = "com.pmart.customer"
     }
 
     buildTypes {

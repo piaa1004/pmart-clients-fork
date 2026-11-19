@@ -190,7 +190,8 @@ function Layout() {
         <div id={DETAIL_BAR_SLOT} className="sticky top-14 z-10" />
         {/* 인터넷 끊김 띠(2026-11-19) */}
         <ConnectionBanner />
-        <main className="min-w-0 flex-1 space-y-5 p-6">
+        {/* 본문 겉모습: 쿠팡 윙 느낌(index.css data-skin=wing, 2026-11-19 통합 백오피스와 같게) — 왼쪽 메뉴·머리줄·어두운 화면은 그대로 */}
+        <main className="min-w-0 flex-1 space-y-5 p-6" data-skin="wing">
           <Outlet />
         </main>
       </div>

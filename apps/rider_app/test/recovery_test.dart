@@ -190,6 +190,28 @@ void main() {
     expect(find.text('반납완료'), findsOneWidget);
   });
 
+  test('failure.returnBy: OTHER_RIDER 면 다른 라이더 반납, SAME_RIDER·없음이면 아님(execution 0.31.1)', () {
+    DeliveryView of(String? returnBy) => deliveryFromContract(
+      ex.DeliveryExecution.fromJson({
+        'deliveryId': 'dlv-1',
+        'state': 'FAILED',
+        'failure': {
+          'decision': 'CONFIRM',
+          'custody': 'RIDER',
+          'returnDeliveryId': 'ret-1',
+          'returnBy': ?returnBy,
+        },
+      }),
+    );
+    expect(of('OTHER_RIDER').returnByOtherRider, isTrue);
+    expect(of('SAME_RIDER').returnByOtherRider, isFalse);
+    expect(
+      of(null).returnByOtherRider,
+      isFalse,
+      reason: '옛 응답 — 404 확인으로 넘어간다',
+    );
+  });
+
   test('확정 필드: decision CONFIRM·custody·returnDeliveryId, purpose FAILED_DELIVERY_RETURN 은 바로 반납', () {
     final failed = deliveryFromContract(
       ex.DeliveryExecution.fromJson({

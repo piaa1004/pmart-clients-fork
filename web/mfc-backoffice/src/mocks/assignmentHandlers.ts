@@ -1,4 +1,4 @@
-// 배정 목: mfc-capacity-service 0.14.0 `/assignments`(목록·수동 배정), `/assignment-plans*`(추천 계산·조회·확정).
+// 배정 목: mfc-capacity-service 0.14.0 `/assignments`(목록·수동 배정), `/assignment-plans*`(추천 계산·조회·확정, 0.22.0 commit: true = 작업 시작).
 // 서버 규칙 중 화면이 보여 줄 것만: 그 센터 권한, 관리 = MFC_SUPERVISOR, 기본 ACTIVE, X-Expected-Version = 지금 활성 담당 버전(없으면 0),
 // 작업자 적격(등록·재직·업무 — 422 코드), 같은 사람이면 변화 없음(200), 지금 적격 여부(workerEligibility), 추천은 READY 작업만 · 확정 때 다시 확인(409 PLAN_STALE).
 import { http, HttpResponse } from 'msw';
@@ -76,7 +76,7 @@ export const assignmentHandlers = [
 
   http.post(`${API_BASE}/assignment-plans`, async ({ request }) => {
     if (!operator(request)) return unauthorized();
-    const body = (await request.json()) as { mfcId: string; horizonMinutes: number };
+    const body = (await request.json()) as { mfcId: string; horizonMinutes: number; commit?: boolean };
     if (!canAccess(request, body.mfcId) || !isSupervisor(request)) return problem(403, 'FORBIDDEN');
     if (!(body.horizonMinutes >= 10 && body.horizonMinutes <= 480)) return problem(400, 'VALIDATION_FAILED', [{ field: 'horizonMinutes', reason: 'INVALID_FORMAT' }]);
     return idempotent(request, () => {
@@ -123,6 +123,11 @@ export const assignmentHandlers = [
         committedBy: null,
         committedAt: null,
       };
+      // (0.22.0) commit: true = "작업 시작" — 추천이 되면 바로 확정(배정)
+      if (body.commit && plan.state === 'PROPOSED') {
+        const committed = commitPlan(plan, operator(request)?.subject ?? null);
+        return { status: 201, body: committed };
+      }
       db.plans.set(plan.planId, plan);
       return { status: 201, body: plan };
     });
@@ -153,6 +158,13 @@ export const assignmentHandlers = [
         db.plans.set(plan.planId, { ...plan, state: 'STALE', staleReasons: stale.map((i) => `TASK_CHANGED:${i.taskId ?? ''}`) });
         return problem(409, 'PLAN_STALE');
       }
+      return { status: 200, body: commitPlan(plan, operator(request)?.subject ?? null) };
+    });
+  }),
+];
+
+/** 추천 확정 — 배정을 만들고 작업 목록 담당 투영도 맞춘다 */
+function commitPlan(plan: MockPlan, by: string | null): MockPlan {
       const made: MockAssignment[] = (plan.items ?? []).map((i) => ({
         assignmentId: `ASG-${nextSeq()}`,
         mfcId: plan.mfcId,
@@ -164,13 +176,15 @@ export const assignmentHandlers = [
         assignedAt: timestamp(),
         source: 'PLAN',
         planId: plan.planId,
-        assignedBy: operator(request)?.subject ?? null,
+        assignedBy: by,
         warnings: [],
       }));
       db.assignments = [...db.assignments, ...made];
-      const next: MockPlan = { ...plan, state: 'COMMITTED', assignments: made.map(withEligibility), committedBy: operator(request)?.subject ?? null, committedAt: timestamp() };
+      for (const a of made) {
+        const task = db.tasks.get(a.taskId);
+        if (task) db.tasks.set(a.taskId, { ...task, state: task.state === 'READY' ? 'ASSIGNED' : task.state, assignment: { workerId: a.workerId, assignmentVersion: a.assignmentVersion } });
+      }
+      const next: MockPlan = { ...plan, state: 'COMMITTED', assignments: made.map(withEligibility), committedBy: by, committedAt: timestamp() };
       db.plans.set(next.planId, next);
-      return { status: 200, body: next };
-    });
-  }),
-];
+      return next;
+}

@@ -10,8 +10,9 @@ import { request } from '@pmart/web-core';
 import { CommandFeedback, QueryState, toUiState, useCommand } from '@pmart/web-ui';
 import { commandParams } from '../../api/command';
 import { useApi } from '../../app/ApiContext';
-import { ChipGroup, FieldList, PageHeader, ResultBar, SearchPanel, SearchRow, StatusBadge, type Tone } from '../../shared/admin';
+import { AllDone, ChipGroup, FieldList, PageHeader, ResultBar, SearchPanel, SearchRow, StatusBadge, type Tone } from '../../shared/admin';
 import { SavedViews } from '../../shared/SavedViews';
+import { ui } from '../../shared/uiMessages';
 import { DeliveryNo, resolveRiderId, RiderName, searchHint, StaffName, SystemIds, useDeliveryNumbers, useRiderSummaries } from '../../shared/displayNumbers';
 import { useSession } from '../../app/SessionContext';
 import { when, won } from '../../shared/opsUi';
@@ -112,7 +113,17 @@ export function AppealsMenu() {
           )}
         </div>
       )}
-      <SearchPanel onSubmit={submit} onReset={reset} submitLabel={t.search} resetLabel={t.reset}>
+      <SearchPanel
+        onSubmit={submit}
+        onReset={reset}
+        submitLabel={t.search}
+        resetLabel={t.reset}
+        summary={[
+          [t.state, state === 'OPEN' ? '' : state === 'ALL' ? t.all : (t.stateName[state] ?? state)],
+          [t.type, targetType === 'ALL' ? '' : (t.typeName[targetType] ?? targetType)],
+          ['라이더', riderId ? (/^\d{6}$/.test(riderId) ? riderId : '한 라이더') : ''],
+        ]}
+      >
         <SearchRow label={t.state}>
           <ChipGroup
             label={t.state}
@@ -136,73 +147,78 @@ export function AppealsMenu() {
           </label>
         </SearchRow>
       </SearchPanel>
-      <QueryState state={toUiState(list, (x) => x.items.length === 0)} onRetry={() => void list.refetch()} emptyText={t.empty}>
-        {(x) => (
-          <div className="space-y-3">
-            <ResultBar count={x.items.length} />
-            <ul className="space-y-3">
-              {x.items.map((a) => {
-                const s = riders.get(a.riderId);
-                return (
-                  <li key={a.appealId} className="overflow-hidden rounded-box border border-base-300 bg-base-100 text-sm" data-testid="appeal-row">
-                    <div className="flex flex-wrap items-center justify-between gap-2 border-b border-base-200 px-5 py-3">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <StatusBadge tone={tone(a.state)}>{t.stateName[a.state] ?? a.state}</StatusBadge>
-                        <span className="font-semibold">{t.typeName[a.targetType] ?? a.targetType}</span>
-                        <Link to={`/riders/${encodeURIComponent(a.riderId)}`} className="hover:underline">
-                          <RiderName riderId={a.riderId} nameMasked={s?.nameMasked} riderNumber={s?.riderNumber} />
-                        </Link>
-                      </div>
-                      <span className="text-xs text-base-content/55">
-                        {t.col.submitted} {when(a.submittedAt)}
-                      </span>
-                    </div>
-                    <div className="space-y-3 px-5 py-3">
-                      <FieldList
-                        rows={[
-                          a.targetType === 'EARNING'
-                            ? [
-                                t.col.target,
-                                <Link to={`/deliveries/${encodeURIComponent(a.targetRef)}`} className="hover:underline">
-                                  <DeliveryNo deliveryId={a.targetRef} deliveryNumber={deliveryNos.get(a.targetRef)?.deliveryNumber} orderNumber={deliveryNos.get(a.targetRef)?.orderNumber} />
-                                </Link>,
-                              ]
-                            : null,
-                          a.targetType === 'RESTRICTION' && a.restriction ? [t.col.restriction, t.restrictionName[a.restriction] ?? a.restriction] : null,
-                          [t.col.body, <p className="whitespace-pre-wrap">{a.body}</p>],
-                        ]}
-                      />
-                      <SystemIds ids={[[t.sys.appeal, a.appealId], [a.targetType === 'EARNING' ? t.sys.delivery : t.sys.restriction, a.targetRef], [t.sys.rider, a.riderId]]} />
-                    </div>
-                    <div className="border-t border-base-200 bg-base-200/50 px-5 py-3">
-                      {a.state === 'OPEN' ? (
-                        <AppealDecision
-                          appealId={a.appealId}
-                          targetType={a.targetType}
-                          onDone={(r) => setDone({ text: t.doneLine(t.typeName[a.targetType] ?? a.targetType, s?.riderNumber ?? a.riderId, t.stateName[r.state] ?? r.state), compensate: r.adjustmentRequired ? { appealId: a.appealId, deliveryId: a.targetRef } : null })}
-                        />
-                      ) : (
-                        <div data-testid="appeal-decided">
-                          <p className="text-base-content/70">{t.decidedLine(t.stateName[a.state] ?? a.state, when(a.decidedAt))} <StaffName operatorId={a.decidedBy} me={me} /></p>
-                          {a.decisionNote && <p className="mt-1 whitespace-pre-wrap">{a.decisionNote}</p>}
-                          {a.targetType === 'EARNING' && a.state === 'ACCEPTED' && (
-                            <div className="mt-2 space-y-1">
-                              <CompensationBox appealId={a.appealId} />
-                              <Link to={adjustmentLink(a.targetRef)} className="link text-xs">
-                                {t.toAdjustUncalculable}
-                              </Link>
-                            </div>
-                          )}
+      {/* 할 일이 서버 0건이면 "수고하셨어요"(2026-11-19 통합 백오피스 AllDone) — 읽는 중·실패·거르기를 건 때는 그리지 않는다 */}
+      {state === 'OPEN' && targetType === 'ALL' && !riderId && list.isSuccess && list.data.items.length === 0 ? (
+        <AllDone title={ui.allDone} body={t.empty} testId="appeals-all-done" />
+      ) : (
+        <QueryState state={toUiState(list, (x) => x.items.length === 0)} onRetry={() => void list.refetch()} emptyText={t.empty}>
+          {(x) => (
+            <div className="space-y-3">
+              <ResultBar count={x.items.length} />
+              <ul className="space-y-3">
+                {x.items.map((a) => {
+                  const s = riders.get(a.riderId);
+                  return (
+                    <li key={a.appealId} className="overflow-hidden rounded-box border border-base-300 bg-base-100 text-sm" data-testid="appeal-row">
+                      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-base-200 px-5 py-3">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <StatusBadge tone={tone(a.state)}>{t.stateName[a.state] ?? a.state}</StatusBadge>
+                          <span className="font-semibold">{t.typeName[a.targetType] ?? a.targetType}</span>
+                          <Link to={`/riders/${encodeURIComponent(a.riderId)}`} className="hover:underline">
+                            <RiderName riderId={a.riderId} nameMasked={s?.nameMasked} riderNumber={s?.riderNumber} />
+                          </Link>
                         </div>
-                      )}
-                    </div>
-                  </li>
-                );
-              })}
-            </ul>
-          </div>
-        )}
-      </QueryState>
+                        <span className="text-xs text-base-content/55">
+                          {t.col.submitted} {when(a.submittedAt)}
+                        </span>
+                      </div>
+                      <div className="space-y-3 px-5 py-3">
+                        <FieldList
+                          rows={[
+                            a.targetType === 'EARNING'
+                              ? [
+                                  t.col.target,
+                                  <Link to={`/deliveries/${encodeURIComponent(a.targetRef)}`} className="hover:underline">
+                                    <DeliveryNo deliveryId={a.targetRef} deliveryNumber={deliveryNos.get(a.targetRef)?.deliveryNumber} orderNumber={deliveryNos.get(a.targetRef)?.orderNumber} />
+                                  </Link>,
+                                ]
+                              : null,
+                            a.targetType === 'RESTRICTION' && a.restriction ? [t.col.restriction, t.restrictionName[a.restriction] ?? a.restriction] : null,
+                            [t.col.body, <p className="whitespace-pre-wrap">{a.body}</p>],
+                          ]}
+                        />
+                        <SystemIds ids={[[t.sys.appeal, a.appealId], [a.targetType === 'EARNING' ? t.sys.delivery : t.sys.restriction, a.targetRef], [t.sys.rider, a.riderId]]} />
+                      </div>
+                      <div className="border-t border-base-200 bg-base-200/50 px-5 py-3">
+                        {a.state === 'OPEN' ? (
+                          <AppealDecision
+                            appealId={a.appealId}
+                            targetType={a.targetType}
+                            onDone={(r) => setDone({ text: t.doneLine(t.typeName[a.targetType] ?? a.targetType, s?.riderNumber ?? a.riderId, t.stateName[r.state] ?? r.state), compensate: r.adjustmentRequired ? { appealId: a.appealId, deliveryId: a.targetRef } : null })}
+                          />
+                        ) : (
+                          <div data-testid="appeal-decided">
+                            <p className="text-base-content/70">{t.decidedLine(t.stateName[a.state] ?? a.state, when(a.decidedAt))} <StaffName operatorId={a.decidedBy} me={me} /></p>
+                            {a.decisionNote && <p className="mt-1 whitespace-pre-wrap">{a.decisionNote}</p>}
+                            {a.targetType === 'EARNING' && a.state === 'ACCEPTED' && (
+                              <div className="mt-2 space-y-1">
+                                <CompensationBox appealId={a.appealId} />
+                                <Link to={adjustmentLink(a.targetRef)} className="link text-xs">
+                                  {t.toAdjustUncalculable}
+                                </Link>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          )}
+        </QueryState>
+      )}
     </section>
   );
 }

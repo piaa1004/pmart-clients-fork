@@ -1,12 +1,13 @@
-// 사본: web/backoffice/src/shared/admin.tsx (a28b21a) — 이 앱에서 따로 고친다. 모양만인 부품은 web-ui 로 옮겨질 예정(지침 all/2026-11-19-request-ui-ux-align §0).
+// 사본: web/backoffice/src/shared/admin.tsx (main 87c0403) — 이 앱에서 따로 고친다. 모양만인 부품은 web-ui 로 옮겨질 예정(지침 all/2026-11-19-request-ui-ux-align §0).
 // (원래 이 앱 admin.tsx(PR #93)를 통합 백오피스가 베껴 다듬은 것을 2026-11-19 다시 가져왔다 — 세 직원 웹이 같은 느낌이 되게.)
 // 운영 관리자 화면 공통 부품(2026-11-18, PC 5 — 사용자 "배민 장보기·쇼핑 관리자 가이드의 화면 구성 참고").
 // - 쪽 머리말: 제목 + 한 줄 설명 + 오른쪽 동작
-// - 검색 조건: 목록 카드 맨 위 필터 줄(항목명은 칸 위에 작게, [초기화][조회] 오른쪽) → 결과 줄 → 표가 한 카드로(index.css data-list-part)
+// - 검색 조건: 목록 카드 맨 위 필터 줄(항목명은 칸 위에 작게, [초기화][조회] 오른쪽) → 결과 줄 → 표가 한 카드로(index.css data-list-part). summary 를 주면 조건을 건 뒤 칩 한 줄로 접힌다
 // - 표: 옅은 머리줄, 줄 전체 누르면 상세
 // - 상세: 제목·표시·요약 + 오른쪽 동작 버튼(내리면 위에 제목 띠), 목록 순서대로 이전·다음, 그 아래 구역 상자
-// 이 앱에서 다른 점: 쪽 제목 옆 묶음 아이콘 없음, DetailHeader 에 이전·다음(QueueNav)·최근 봄 기록(seen).
-import { type FormEvent, type ReactNode, useRef } from 'react';
+// - 숫자 카드(세로형·가로형), 안내 상자(GuideBox), 다 끝났어요 띠(AllDone)
+// 이 앱에서 다른 점: 쪽 제목 옆 묶음 아이콘 없음(본문 겉모습 wing 에서도 숨긴다), DetailHeader 에 이전·다음(QueueNav)·최근 봄 기록(seen).
+import { type FormEvent, type ReactNode, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router';
 
 import { useStatChange } from './motion';
@@ -82,9 +83,22 @@ export function PageHeader({ title, description, actions, back }: { readonly tit
 /** 검색 조건 — 목록 카드 맨 위 필터 줄(2026-11-18 Shopify·Medusa 목록처럼: 항목명은 칸 위에 작게, 버튼은 오른쪽).
  * 바로 뒤의 결과 줄(ResultBar)·표(DataTable)와 한 카드로 붙는다(index.css 의 data-list-part). */
 // 기본 백오피스 사본에만 더함(2026-11-18): submitDisabled(입력이 틀리면 조회를 막는 화면), label(화면 안 폼이 여럿일 때 이름)
-export function SearchPanel({ onSubmit, onReset, children, submitLabel = '조회', resetLabel = '초기화', submitDisabled = false, label = '검색 조건' }: { readonly onSubmit: (e: FormEvent) => void; readonly onReset: () => void; readonly children: ReactNode; readonly submitLabel?: string; readonly resetLabel?: string; readonly submitDisabled?: boolean; readonly label?: string }) {
-  return (
-    <form className="flex flex-wrap items-end gap-x-5 gap-y-3 rounded-box border border-base-300 bg-base-100 px-4 py-3.5 shadow-sm" onSubmit={onSubmit} aria-label={label} data-list-part="top">
+// summary(2026-11-19 쿠팡 윙 반품관리·고객문의 "검색조건 [기간 지난 30일 ▾] … 검색 열기" 참고): [이름, 값] 목록을 주면
+// 조건을 건 뒤에는 한 줄 칩으로 접히고 "검색 열기"로 펼친다. 조건이 없으면 처음부터 펼친다(입력해야 하니까). 칩을 눌러도 펼친다.
+export function SearchPanel({ onSubmit, onReset, children, submitLabel = '조회', resetLabel = '초기화', submitDisabled = false, label = '검색 조건', summary }: { readonly onSubmit: (e: FormEvent) => void; readonly onReset: () => void; readonly children: ReactNode; readonly submitLabel?: string; readonly resetLabel?: string; readonly submitDisabled?: boolean; readonly label?: string; readonly summary?: ReadonlyArray<readonly [string, string]> }) {
+  const active = (summary ?? []).filter(([, v]) => v !== '');
+  const [open, setOpen] = useState(active.length === 0);
+  const form = (
+    <form
+      className={`flex flex-wrap items-end gap-x-5 gap-y-3 rounded-box border border-base-300 bg-base-100 px-4 py-3.5 shadow-sm ${summary ? 'rounded-t-none border-t-0' : ''}`}
+      onSubmit={(e) => {
+        onSubmit(e);
+        if (summary) setOpen(false);
+      }}
+      aria-label={label}
+      data-list-part="top"
+      hidden={summary !== undefined && !open}
+    >
       {children}
       <div className="ml-auto flex gap-2">
         <button type="button" className="btn btn-sm btn-ghost" onClick={onReset}>
@@ -95,6 +109,38 @@ export function SearchPanel({ onSubmit, onReset, children, submitLabel = '조회
         </button>
       </div>
     </form>
+  );
+  if (!summary) return form;
+  return (
+    <div data-testid="search-summary-panel">
+      <div className={`flex flex-wrap items-center gap-2 rounded-box border border-base-300 bg-base-200/60 px-4 py-2.5 ${open ? 'rounded-b-none' : ''}`}>
+        <span className="inline-flex items-center gap-1.5 text-sm font-bold">
+          <svg viewBox="0 0 24 24" className="h-4 w-4 fill-none stroke-current" strokeWidth={2} strokeLinecap="round" aria-hidden="true">
+            <path d="M11 18a7 7 0 1 0 0-14 7 7 0 0 0 0 14Zm9 2-4-4" />
+          </svg>
+          {label}
+        </span>
+        {summary.map(([k, v]) => (
+          <button
+            key={k}
+            type="button"
+            className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs ${v ? 'border-primary bg-base-100 text-base-content' : 'border-base-300 bg-base-100 text-base-content/60'}`}
+            onClick={() => setOpen(true)}
+            // 이 앱: 칩 이름이 거르기 값으로 끝나면 그 값 이름의 단추로 오해된다(예: "승인") — 칩은 "… 조건 바꾸기"로 읽힌다
+            aria-label={`${k} ${v || '전체'} 조건 바꾸기`}
+            data-testid="search-chip"
+          >
+            <span className="font-semibold">{k}</span>
+            <span className={v ? 'text-primary' : ''}>{v || '전체'}</span>
+            <span aria-hidden="true">▾</span>
+          </button>
+        ))}
+        <button type="button" className="btn btn-ghost btn-xs ml-auto border border-base-300 bg-base-100" aria-expanded={open} onClick={() => setOpen((o) => !o)} data-testid="search-toggle">
+          {open ? '검색 닫기 ▴' : '검색 열기 ▾'}
+        </button>
+      </div>
+      {form}
+    </div>
   );
 }
 
@@ -265,10 +311,27 @@ export function FieldList({ rows, testId }: { readonly rows: ReadonlyArray<reado
  * 통계 카드 — 관제 형식(2026-11-19 사용자가 보여 준 배송 관제 화면): 왼쪽 색 막대 + 이름 + 큰 숫자 + 설명 한 줄.
  * 색은 tone 이 있을 때만(0 이거나 평범하면 회색 막대). active 면 지금 고른 거르기라는 테두리.
  */
-export function StatCard({ label, value, hint, to, tone, testId, active = false }: { readonly label: ReactNode; readonly value: ReactNode; readonly hint?: ReactNode; readonly to?: string; readonly tone?: 'warning' | 'error' | 'info' | 'success' | undefined; readonly testId?: string; readonly active?: boolean }) {
+// layout 'row'(2026-11-19 쿠팡 윙 가격관리 참고): 이름·도움말 왼쪽, 큰 숫자 오른쪽. 기본 'stack' 은 이름 아래 숫자
+export function StatCard({ label, value, hint, to, tone, testId, active = false, layout = 'stack' }: { readonly label: ReactNode; readonly value: ReactNode; readonly hint?: ReactNode; readonly to?: string; readonly tone?: 'warning' | 'error' | 'info' | 'success' | undefined; readonly testId?: string; readonly active?: boolean; readonly layout?: 'stack' | 'row' }) {
   const bar = tone ? { error: 'bg-error', warning: 'bg-warning', info: 'bg-info', success: 'bg-success' }[tone] : 'bg-base-300';
   const ch = useStatChange(value); // 방금 바뀐 칸만 잠깐 빛남 + ▲▼(2026-11-19)
-  const body = (
+  const valueCls = tone === 'error' ? 'text-error' : tone === 'warning' ? 'text-warning' : '';
+  const body =
+    layout === 'row' ? (
+      <>
+        <span className={`absolute inset-y-0 left-0 w-1 ${bar}`} aria-hidden="true" />
+        <span className="flex items-start justify-between gap-3">
+          <span className="min-w-0">
+            <span className="block text-sm font-semibold">{label}</span>
+            {hint && <span className="mt-0.5 block text-[11px] text-base-content/50">{hint}</span>}
+          </span>
+          <span className={`shrink-0 text-3xl font-bold leading-none tabular-nums ${valueCls}`}>
+            {value}
+            {ch.badge}
+          </span>
+        </span>
+      </>
+    ) : (
     <>
       <span className={`absolute inset-y-0 left-0 w-1 ${bar}`} aria-hidden="true" />
       <p className="text-xs font-medium text-base-content/60">{label}</p>
@@ -279,7 +342,8 @@ export function StatCard({ label, value, hint, to, tone, testId, active = false 
       {hint && <p className="text-[11px] text-base-content/50">{hint}</p>}
     </>
   );
-  const cls = `relative block space-y-0.5 overflow-hidden rounded-box border bg-base-100 py-3 pl-4 pr-3 shadow-sm ${active ? 'border-primary ring-1 ring-primary/30' : 'border-base-300'} ${ch.cls}`;
+  // 고른 카드: 테두리 + 옅은 바탕(쿠팡 윙처럼 어느 상태를 보는지 한눈에)
+  const cls = `relative block space-y-0.5 overflow-hidden rounded-box border py-3 pl-4 pr-3 shadow-sm ${layout === 'row' ? 'min-h-20 py-4' : ''} ${active ? 'border-primary bg-primary/5 ring-1 ring-primary/30' : 'border-base-300 bg-base-100'} ${ch.cls}`;
   return to ? (
     <Link to={to} className={`${cls} transition hover:-translate-y-0.5 hover:shadow-md`} data-testid={testId} aria-current={active ? 'true' : undefined}>
       {body}
@@ -339,5 +403,72 @@ export function Notice({ children, tone = 'muted' }: { readonly children: ReactN
     <p role="note" className={`rounded-box px-4 py-3 text-sm ${tone === 'warning' ? 'bg-warning/15' : 'bg-base-300/50 text-base-content/75'}`}>
       {children}
     </p>
+  );
+}
+
+/**
+ * 안내 상자(2026-11-19 쿠팡 윙 "반품 정보안내"처럼) — ⓘ 제목 + 글머리 몇 줄, 접기. 이 브라우저에서 접은 것은 기억(화면마다 key).
+ * 규칙 문구는 화면이 이미 쓰는 업무 문구만 — 새 규칙을 만들지 않는다.
+ */
+// tone 'warning' = 올리기 전 주의(쿠팡 윙 일괄등록의 주황 띠처럼)
+export function GuideBox({ title, items, storeKey, testId, tone = 'info' }: { readonly title: string; readonly items: readonly ReactNode[]; readonly storeKey: string; readonly testId?: string; readonly tone?: 'info' | 'warning' }) {
+  const k = `pmart.rider-backoffice.guide.${storeKey}`;
+  const [open, setOpen] = useState(() => {
+    try {
+      return window.localStorage.getItem(k) !== 'closed';
+    } catch {
+      return true;
+    }
+  });
+  const toggle = () => {
+    const next = !open;
+    setOpen(next);
+    try {
+      window.localStorage.setItem(k, next ? 'open' : 'closed');
+    } catch {
+      // 저장이 막힌 브라우저 — 이번 화면에서만
+    }
+  };
+  return (
+    <div className={`rounded-box border px-5 py-3 ${tone === 'warning' ? 'border-warning/50 bg-warning/10' : 'border-base-300 bg-base-200/50'}`} data-testid={testId}>
+      <button type="button" className="flex w-full items-center justify-between gap-2 text-left text-sm font-semibold" aria-expanded={open} onClick={toggle}>
+        <span className="inline-flex items-center gap-2">
+          <span className={`flex h-5 w-5 items-center justify-center rounded-full text-[11px] font-bold ${tone === 'warning' ? 'bg-warning text-warning-content' : 'border border-base-content/40'}`} aria-hidden="true">
+            {tone === 'warning' ? '!' : 'i'}
+          </span>
+          {title}
+        </span>
+        <span className="text-xs text-base-content/50" aria-hidden="true">
+          {open ? '▴' : '▾'}
+        </span>
+      </button>
+      {open && (
+        <ul className="mt-2 list-inside list-disc space-y-1 text-sm text-base-content/70">
+          {items.map((t, i) => (
+            <li key={i}>{t}</li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+/**
+ * 다 끝났어요 띠(2026-11-19 쿠팡 윙 배송관리 "수고많으셨습니다! 모든 주문의 발송 처리가 끝났습니다" 참고).
+ * 서버가 0건이라고 확인했을 때만 그린다 — 읽는 중·조회 실패에는 그리지 않는다(부르는 쪽이 성공일 때만).
+ */
+export function AllDone({ title, body, testId = 'all-done' }: { readonly title: string; readonly body?: string; readonly testId?: string }) {
+  return (
+    <div role="status" className="flex items-center gap-3 rounded-box border border-success/30 bg-success/10 px-5 py-3.5" data-testid={testId}>
+      <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-success text-white" aria-hidden="true">
+        <svg viewBox="0 0 24 24" className="h-4 w-4 fill-none stroke-current" strokeWidth={3} strokeLinecap="round" strokeLinejoin="round">
+          <path d="M5 12.5l4.5 4.5L19 7.5" />
+        </svg>
+      </span>
+      <span>
+        <span className="block font-bold">{title}</span>
+        {body && <span className="block text-sm text-base-content/65">{body}</span>}
+      </span>
+    </div>
   );
 }

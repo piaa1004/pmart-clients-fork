@@ -17,6 +17,7 @@ export const messages = {
   /** 화면 번호(ADR-0070) */
   displayNumber: {
     missing: '번호 없음',
+    failed: '번호 확인 불가',
     riderHidden: '라이더 정보 비공개',
     systemNumbers: '시스템 번호',
     system: { orderId: '주문', deliveryId: '배송', shipmentId: '출고', packageId: '포장', riderId: '라이더' },
@@ -163,6 +164,7 @@ export const messages = {
     packingHandover: '포장 인계',
     deliveries: '배송 현황',
     dispatchFailures: '배차 실패',
+    dispatchDelays: '배차 지연',
     returnHandovers: '반납 인증번호',
   },
 
@@ -199,7 +201,7 @@ export const messages = {
     subtitle: (at: string) => `${at} 기준 · 숫자를 누르면 아래 처리함이 그 일만 보여요. 1분마다 다시 읽어요.`,
     todoTitle: '내 할 일',
     todoHint: '급한 것부터 · 누르면 그 일만 모아 봐요',
-    tile: { overdue: '출하 약속 초과', dueSoon: '출하 약속 임박', short: '결품 줄(오늘)', damaged: '파손 줄(오늘)', handover: '인계 확인 필요' },
+    tile: { overdue: '출하 약속 초과', dueSoon: '출하 약속 임박', short: '결품 줄(오늘)', damaged: '파손 줄(오늘)', handover: '인계 확인 필요', dispatchDelay: '배차 지연(픽업 전)' },
     lines: (n: number) => `${n}줄`,
     issue: {
       overdue: (n: number) => `출하 약속 초과 ${n}건`,
@@ -259,6 +261,25 @@ export const messages = {
   },
 
   /** 반납 인증번호(delivery-execution 0.28.0 — PDA 반납 인증번호 화면과 같은 문구) */
+  /** 배차 지연(delivery-dispatch 0.12.0) */
+  dispatchDelays: {
+    guideTitle: '배차 지연 안내',
+    guide: [
+      '라이더가 아직 픽업하지 않았는데 서버가 "약속보다 늦어질 것"이라고 알린 배송이에요(약속이 이른 것부터). 픽업하면 목록에서 빠져요.',
+      '약속 대비는 지금 시각 − 고객 약속 시각이에요. 라이더가 없으면 배송 현황·배차 실패에서 상황을 봐요.',
+      '배차 불가로 취소하면 주문 전체 취소 · 전액 환불이에요(쿠폰은 아직 없어요).',
+    ],
+    none: '배차가 늦어지는 배송이 없어요.',
+    numbersFailed: '배송 번호를 읽지 못했어요 — 번호 칸은 "번호 확인 불가"로 보여요.',
+    col: { delivery: '배송 번호', state: '배차 상태', rider: '라이더', promised: '약속 시각', late: '약속 대비', alerted: '지연 안내', action: '조치' },
+    state: { CREATED: '배차 전', DISPATCHING: '라이더 찾는 중', ASSIGNED: '배정됨(픽업 전)' } as Readonly<Record<string, string>>,
+    noRider: '라이더 없음',
+    noPromise: '약속 없음',
+    over: (min: number) => `${min}분 지남`,
+    left: (min: number) => `${min}분 남음`,
+    cancel: '배차 불가로 취소',
+    cancelBlocked: '"배차 불가로 취소"는 아직 못 해요 — 주문 전체 행·수량을 센터 관리자가 읽을 API 가 없어 백엔드에 요청했어요. 급하면 고객센터(통합 백오피스)에 취소를 부탁해 주세요.',
+  },
   returnHandovers: {
     title: '반납 인증번호',
     intro: '라이더가 회수품을 가져오면 이 번호를 알려 주세요. 라이더가 라이더 앱에 번호를 넣으면 반납이 끝나요. 현장 PDA 에도 같은 번호가 보여요.',
@@ -788,8 +809,26 @@ export const messages = {
   assignments: {
     openTask: '작업 보기',
     planLabel: '배정 추천',
-    intro: '작업마다 담당 한 명을 정해요. 직접 정하거나, 추천(OR-Tools)을 계산해 보고 확정해요. 작업 시작 가능 여부는 현장 작업 서비스가 시작 때 판정해요.',
-    tabs: { list: '배정 목록', manual: '직접 배정', plan: '배정 추천' },
+    intro: '작업마다 담당 한 명을 정해요. "작업 시작"을 누르면 추천대로 바로 배정되고, 바꾸기는 아래 목록·담당 없는 작업·직접 배정에서 해요. 작업 시작 가능 여부는 현장 작업 서비스가 시작 때 판정해요.',
+    tabs: { list: '지금 배정', unassigned: '담당 없는 작업', manual: '직접 배정', plan: '지난 작업 시작' },
+    /** 작업 시작(capacity 0.22.0 commit: true) */
+    start: {
+      title: '작업 시작',
+      hint: '누르면 담당 없는 작업을 추천대로 바로 작업자에게 배정해요(PDA 다음 작업 받기에 바로 보여요). 바꾸기는 아래에서 해요.',
+      horizon: '나눌 일감',
+      minutes: (n: number) => `앞으로 ${n}분`,
+      button: '작업 시작',
+      running: '배정하는 중…',
+      done: (made: number, left: number) => `${made}건 배정했어요${left > 0 ? ` · ${left}건은 남았어요` : ''}.`,
+      noSolution: '지금 배정할 수 있는 작업·작업자가 없어요.',
+      stale: '배정하는 사이에 작업이 바뀌었어요. "작업 시작"을 다시 눌러 주세요.',
+      otherState: (s: string) => `배정 결과 상태: ${s}`,
+      leftTitle: '남은 작업:',
+      reason: { NO_ELIGIBLE_WORKER: '맡을 작업자 없음', NO_TIME: '시간 안에 못 끝냄', CONFIG_REQUIRED: '작업 시간 설정 필요', UNDETERMINED: '계산이 판단 못 함', UNKNOWN: '사유 모름' } as Readonly<Record<string, string>>,
+      unassignedHint: '아직 담당이 없는 작업(대기)이에요. "담당 정하기"로 바로 정하거나, 위 "작업 시작"으로 한꺼번에 배정해요.',
+      noUnassigned: '담당 없는 작업이 없어요.',
+      moreInTasks: '50건이 넘어요 — 나머지는 작업 현황(대기)에서 봐요.',
+    },
     filters: { state: '상태', date: '배정한 날(한국)', worker: '작업자', task: '작업 ID' },
     state: { ACTIVE: '진행 중', SUPERSEDED: '바뀜', RELEASED: '풀림' } as Readonly<Record<string, string>>,
     source: { MANUAL: '직접', PLAN: '추천 확정', SYSTEM: '다음 작업 받기' } as Readonly<Record<string, string>>,

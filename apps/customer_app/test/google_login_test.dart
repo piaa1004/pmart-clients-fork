@@ -75,7 +75,7 @@ void main() {
   });
 
   group('제공자 버튼', () {
-    test('실서버는 Google 만, 목은 카카오·네이버·구글', () {
+    test('실서버·목 모두 카카오·네이버·구글', () {
       ProviderContainer make(PmartEnv env) {
         final c = ProviderContainer(
           overrides: [envProvider.overrideWithValue(env)],
@@ -84,9 +84,7 @@ void main() {
         return c;
       }
 
-      expect(make(PmartEnv.local).read(loginProvidersProvider), [
-        SocialProvider.google,
-      ]);
+      expect(make(PmartEnv.local).read(loginProvidersProvider), loginProviders);
       expect(make(PmartEnv.mock).read(loginProvidersProvider), loginProviders);
     });
 

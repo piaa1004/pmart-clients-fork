@@ -123,16 +123,29 @@ class _MyInfoScreenState extends ConsumerState<MyInfoScreen> {
                       NameInput.valid(v ?? '') ? null : l10n.infoNameInvalid,
                 ),
                 const SizedBox(height: 8),
-                // 연락처는 서버가 본인 확인 방식을 정한 뒤 연다. 그때까지 잠근 칸으로 두고 등록된 번호만 보인다.
+                // 휴대폰 번호는 "번호 확인"(OCTOMO) 화면에서 넣고 확인한다(customer 0.9.0). 여기서는 보이기만.
                 TextFormField(
-                  key: const ValueKey('info-phone'),
+                  key: ValueKey('info-phone-${profile.phoneMasked}'),
                   enabled: false,
                   initialValue: hasPhone ? profile.phoneMasked : '',
                   decoration: InputDecoration(
                     labelText: l10n.infoPhone,
-                    helperText: l10n.infoPhonePending,
+                    helperText: !hasPhone
+                        ? null
+                        : profile.phoneVerified
+                        ? l10n.infoPhoneVerified
+                        : l10n.infoPhoneUnverified,
                   ),
                 ),
+                if (!profile.phoneVerified)
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: TextButton(
+                      key: const ValueKey('info-phone-verify'),
+                      onPressed: () => context.push('/me/phone-verification'),
+                      child: Text(l10n.infoPhoneVerify),
+                    ),
+                  ),
                 if (message != null) ...[
                   const SizedBox(height: 8),
                   Text(message, key: const ValueKey('info-message')),

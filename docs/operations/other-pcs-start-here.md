@@ -62,6 +62,7 @@ PC 1 이 아닌 PC(사람·Claude)가 이 저장소(`pmart-clients`)를 다룰 �
 
 | 파일·폴더 | 언제 |
 |---|---|
+| `pmart-clients/docs/operations/social-login-kakao-naver.md` | 앱에 카카오·네이버 로그인을 붙일 때(서버는 ID 토큰만, 카카오 idToken, 네이버 OIDC+PKCE·redirect 주소, 콘솔·키) — 2026-11-19 PC 1, rider-app 로그인(PC 5)도 같은 방식 |
 | `pmart-clients/docs/backend-requests.md` | 계약에 없는 API·필드가 필요할 때(추측해 만들지 않는다) — BR 상태표. 다른 PC 는 직접 고치지 않고 일지·PR 설명에 적는다(`pc-split.md` §6) |
 | `pmart-clients/docs/handoff/<앱 영역>/`(여러 앱이면 `all/`) | 백엔드에 요청·질문·회신을 보낼 때 — `YYYY-MM-DD-backend-<주제>.md`, 첫머리 `보낸 앱`·`받는 백엔드 영역`. 끝나면 `archive/` 로(`docs/handoff/README.md`, `pc-split.md` §5) |
 | `pmart-backend/contracts/openapi/*.yaml`, `_common.yaml` | REST 계약 정본 — 모델·경로를 확인할 때(읽기만) |

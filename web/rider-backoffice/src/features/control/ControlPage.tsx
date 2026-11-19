@@ -10,7 +10,7 @@ import { request } from '@pmart/web-core';
 import { QueryState, toUiState } from '@pmart/web-ui';
 import type { components } from '../../api/generated/delivery-tracking';
 import { useApi } from '../../app/ApiContext';
-import { ChipGroup, PageHeader, StatusBadge } from '../../shared/admin';
+import { AllDone, ChipGroup, PageHeader, StatusBadge } from '../../shared/admin';
 import { RiderName } from '../../shared/displayNumbers';
 import { isSimRider } from '../../shared/sim';
 import { messages } from '../../shared/messages';
@@ -40,7 +40,18 @@ const cx = {
   receiving: '수신 중',
   legend: { ok: '대기', delivering: '배송 중', stale: '끊김' },
   refresh: '10초마다 새로 불러와요',
+  // 두 줄 카드(2026-11-19 통합 백오피스 실시간 배송 LiveBoards 처럼 — 위는 먼저 확인할 것, 아래는 진행 단계)
+  firstTitle: '먼저 확인해 주세요',
+  flowTitle: '진행 단계',
+  dispatchOff: '신규배차 꺼짐',
+  dispatchOffHint: '운행 중인데 새 배차를 받지 않아요',
+  allClear: '지금 먼저 볼 라이더가 없어요',
+  allClearBody: (k: number) => `운행 중 ${k}명 모두 위치가 들어오고 있고 신규배차를 받고 있어요.`,
+  deliveries: (k: number) => `${k}건`,
+  basis: (riders: number, deliveries: number) => `이 센터 운행 중 라이더 ${riders}명·진행 중 배송 ${deliveries}건 기준(서버가 준 위치 목록). 배송 중 카드를 누르면 그 라이더만 보여요.`,
 } as const;
+
+const FLOW_STAGES = ['TO_STORE', 'AT_STORE', 'TO_CUSTOMER', 'AT_CUSTOMER'] as const;
 
 type Filter = 'all' | 'delivering' | 'stale' | 'sim';
 type Rider = components['schemas']['ControlRider'];
@@ -157,13 +168,8 @@ export function ControlPage() {
             );
             return (
               <div className="space-y-4">
-                {/* 핵심 수 — 누르면 그 거르기(목록·지도가 함께 바뀐다) */}
-                <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-                  <KpiTile label={cx.onDuty} value={cx.people(all.length)} to={filterLink('all')} active={filter === 'all'} hint={ops.dashboard.asOf(when(b.asOf))} testId="control-stat-all" />
-                  <KpiTile label={cx.delivering} value={cx.people(delivering)} to={filterLink('delivering')} active={filter === 'delivering'} dot="bg-info" testId="control-stat-delivering" />
-                  <KpiTile label={cx.waiting} value={cx.people(all.filter((r) => !isDelivering(r) && !isStale(r)).length)} to={filterLink('all')} dot="bg-success" />
-                  <KpiTile label={cx.staleOrNone} value={cx.people(staleOrNone)} to={filterLink('stale')} active={filter === 'stale'} dot="bg-error" alert={staleOrNone > 0} testId="control-stat-stale" />
-                </div>
+                {/* 두 줄 카드 — 위: 먼저 확인(문제, 빨강·주황) / 아래: 진행 단계(› 화살표). 누르면 그 거르기(목록·지도가 함께 바뀐다) */}
+                <ControlBoards all={all} filter={filter} filterLink={filterLink} asOf={b.asOf} staleOrNone={staleOrNone} delivering={delivering} />
 
                 {/* 작업 화면(배민 주문접수처럼): 왼쪽 라이더 목록 · 가운데 지도 · 오른쪽 고른 라이더 상세 — 한 화면에서 스크롤 없이 */}
                 <div className="grid gap-4 xl:h-[calc(100vh-17rem)] xl:min-h-[560px] xl:grid-cols-[20rem_minmax(0,1fr)_24rem]">
@@ -257,14 +263,80 @@ export function ControlPage() {
   );
 }
 
-/** 관제 핵심 수 — 누르면 그 거르기. 고른 거르기는 테두리, 문제가 있으면 빨강 */
-function KpiTile({ label: text, value, to, active = false, dot, alert = false, hint, testId }: { readonly label: string; readonly value: string; readonly to: string; readonly active?: boolean; readonly dot?: string; readonly alert?: boolean; readonly hint?: string; readonly testId?: string }) {
+/**
+ * 두 줄 카드(2026-11-19 — 통합 백오피스 LiveBoards·지침 §2 "라이더 관제에 바로 맞는 모양").
+ * 수는 모두 이 센터 위치 목록(서버 GET /rider-locations)에서 센다 — 끊김은 서버 stale·위치 없음, 단계는 서버 stage.
+ * 먼저 확인할 것이 모두 0 일 때만 "먼저 볼 라이더가 없어요"(읽는 중·실패면 이 칸을 그리지 않는다 — 부르는 쪽이 성공일 때만).
+ */
+function ControlBoards({ all, filter, filterLink, asOf, staleOrNone, delivering }: { readonly all: readonly Rider[]; readonly filter: Filter; readonly filterLink: (f: Filter) => string; readonly asOf: string | undefined; readonly staleOrNone: number; readonly delivering: number }) {
+  const dispatchOff = all.filter((r) => r.newDispatchEnabled === false).length;
+  const actives = all.flatMap((r) => r.activeDeliveries);
+  const byStage = (st: string) => actives.filter((x) => x.stage === st).length;
+  const waiting = all.filter((r) => !isDelivering(r) && !isStale(r)).length;
+  const allClear = staleOrNone === 0 && dispatchOff === 0;
+  const flowCell = (key: string, text: string, value: string, to: string | null, active: boolean, last: boolean) => {
+    const inner = (
+      <>
+        <span className="block text-sm font-semibold">{text}</span>
+        <span className="mt-1 block text-2xl font-bold tabular-nums">{value}</span>
+      </>
+    );
+    const cls = `block w-full rounded-box border px-4 py-3.5 text-left ${active ? 'border-primary bg-primary/5' : 'border-base-300 bg-base-100'}`;
+    return (
+      <li key={key} className="relative">
+        {to ? (
+          <Link to={to} aria-current={active ? 'true' : undefined} data-testid={`control-flow-${key}`} className={`${cls} transition hover:-translate-y-0.5`}>
+            {inner}
+          </Link>
+        ) : (
+          <div data-testid={`control-flow-${key}`} className={cls}>
+            {inner}
+          </div>
+        )}
+        {!last && (
+          <span className="pointer-events-none absolute -right-2.5 top-1/2 z-10 hidden -translate-y-1/2 text-base-content/30 md:block" aria-hidden="true">
+            ›
+          </span>
+        )}
+      </li>
+    );
+  };
   return (
-    <Link
-      to={to}
-      className={`flex items-center justify-between gap-3 rounded-box border bg-base-100 px-5 py-3 ${active ? 'border-primary ring-1 ring-primary' : 'border-base-300 hover:border-primary'}`}
-      data-testid={testId}
-    >
+    <div className="space-y-4" data-testid="control-boards">
+      <section aria-label={cx.firstTitle} className="space-y-2">
+        <h2 className="text-sm font-bold">{cx.firstTitle}</h2>
+        {allClear && all.length > 0 ? (
+          <AllDone title={cx.allClear} body={cx.allClearBody(all.length)} testId="control-all-clear" />
+        ) : (
+          <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+            <KpiTile label={cx.staleOrNone} value={cx.people(staleOrNone)} to={filterLink('stale')} active={filter === 'stale'} dot="bg-error" alert={staleOrNone > 0} testId="control-stat-stale" />
+            <KpiTile label={cx.dispatchOff} value={cx.people(dispatchOff)} hint={cx.dispatchOffHint} dot="bg-warning" warn={dispatchOff > 0} testId="control-stat-dispatch-off" />
+          </div>
+        )}
+      </section>
+      <section aria-label={cx.flowTitle} className="space-y-2">
+        <div className="flex flex-wrap items-baseline justify-between gap-2">
+          <h2 className="text-sm font-bold">{cx.flowTitle}</h2>
+          <Link to={filterLink('all')} className={`text-xs ${filter === 'all' ? 'font-semibold text-primary' : 'text-base-content/60 hover:text-base-content'}`} data-testid="control-stat-all">
+            {cx.onDuty} {cx.people(all.length)} · {ops.dashboard.asOf(when(asOf))}
+          </Link>
+        </div>
+        <ol className="grid grid-cols-2 gap-3 md:grid-cols-6" data-testid="control-flow">
+          {flowCell('waiting', cx.waiting, cx.people(waiting), null, false, false)}
+          {flowCell('delivering', cx.delivering, cx.people(delivering), filterLink('delivering'), filter === 'delivering', false)}
+          {FLOW_STAGES.map((st, i) => flowCell(st, label(n.stage, st), cx.deliveries(byStage(st)), null, false, i === FLOW_STAGES.length - 1))}
+        </ol>
+        <p className="text-xs text-base-content/50">{cx.basis(all.length, actives.length)}</p>
+      </section>
+    </div>
+  );
+}
+
+/** 관제 핵심 수 — 누르면 그 거르기. 고른 거르기는 테두리, 문제가 있으면 빨강 */
+function KpiTile({ label: text, value, to, active = false, dot, alert = false, warn = false, hint, testId }: { readonly label: string; readonly value: string; readonly to?: string; readonly active?: boolean; readonly dot?: string; readonly alert?: boolean; readonly warn?: boolean; readonly hint?: string; readonly testId?: string }) {
+  const cls = `flex items-center justify-between gap-3 rounded-box border px-5 py-3 ${active ? 'border-primary bg-primary/5' : 'border-base-300 bg-base-100'} ${to ? 'hover:border-primary' : ''}`;
+  const body = (
+    <>
       <span className="min-w-0">
         <span className="flex items-center gap-2 text-sm text-base-content/65">
           {dot && <span className={`h-2 w-2 rounded-full ${dot}`} aria-hidden />}
@@ -272,7 +344,16 @@ function KpiTile({ label: text, value, to, active = false, dot, alert = false, h
         </span>
         {hint && <span className="block text-[11px] text-base-content/45">{hint}</span>}
       </span>
-      <span className={`text-2xl font-bold ${alert ? 'text-error' : ''}`}>{value}</span>
+      <span className={`text-2xl font-bold tabular-nums ${alert ? 'text-error' : warn ? 'text-warning' : ''}`}>{value}</span>
+    </>
+  );
+  return to ? (
+    <Link to={to} className={cls} data-testid={testId} aria-current={active ? 'true' : undefined}>
+      {body}
     </Link>
+  ) : (
+    <div className={cls} data-testid={testId}>
+      {body}
+    </div>
   );
 }

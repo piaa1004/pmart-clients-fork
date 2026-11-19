@@ -30,6 +30,7 @@ import {
   type PromiseRow,
   type TaskSummary,
 } from './opsRules';
+import { useDispatchDelays } from '../delivery/DispatchDelayPage';
 import { FlowBoard, RecentPanel, WorkerLoad } from './FlowBoard';
 import { OPS_REFRESH_MS, useOpenTasks } from './opsQueries';
 
@@ -134,7 +135,7 @@ function OpsBoard({ mfcId }: { readonly mfcId: string }) {
           <h2 className="text-sm font-semibold">{m.todoTitle}</h2>
           <span className="text-xs text-base-content/50">{m.todoHint}</span>
         </div>
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
           <Tile
             testId="tile-overdue"
             label={m.tile.overdue}
@@ -185,6 +186,7 @@ function OpsBoard({ mfcId }: { readonly mfcId: string }) {
             active={filter === 'handover'}
             onClick={() => choose('handover')}
           />
+          <DispatchDelayTile mfcId={mfcId} />
         </div>
         <ul className="mt-2 flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-base-content/50" data-testid="ops-rules">
           {notes.map((n) => (
@@ -218,6 +220,30 @@ function OpsBoard({ mfcId }: { readonly mfcId: string }) {
         <RecentPanel mfcId={mfcId} />
       </div>
     </section>
+  );
+}
+
+/** 배차 지연(delivery-dispatch 0.12.0) — 서버가 지연 안내를 낸 픽업 전 배송 수. 누르면 배차 지연 메뉴로 */
+function DispatchDelayTile({ mfcId }: { readonly mfcId: string }) {
+  const q = useDispatchDelays(mfcId);
+  const n = q.data?.length ?? 0;
+  const ch = useStatChange(q.data ? String(n) : undefined);
+  return (
+    <Link to={centerPath(mfcId, 'dispatch-delays')} data-testid="tile-dispatch-delay" className={`block rounded-lg border border-base-300 bg-base-100 px-4 py-3 transition hover:bg-base-200/60 ${ch.cls}`}>
+      <p className="text-xs text-base-content/60">{m.tile.dispatchDelay}</p>
+      {q.isPending ? (
+        <p className="mt-0.5 text-2xl font-bold text-base-content/40">…</p>
+      ) : q.isError ? (
+        <p className="mt-0.5 text-sm font-semibold text-error" data-state="error">
+          {m.failed}
+        </p>
+      ) : (
+        <p data-testid="tile-dispatch-delay-value" className={`mt-0.5 text-2xl font-bold tabular-nums ${n > 0 ? 'text-error' : 'text-base-content/70'}`}>
+          {m.count(n)}
+          {ch.badge}
+        </p>
+      )}
+    </Link>
   );
 }
 

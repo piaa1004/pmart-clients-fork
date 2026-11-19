@@ -126,6 +126,7 @@ Profile profileFromContract(api.Profile p) {
     nickname: p.nickname,
     phoneMasked: p.phoneMasked,
     phone: text(p.phone),
+    phoneVerified: p.phoneVerified ?? false,
     name: text(p.name),
     email: text(p.email),
     emailVerified: p.emailVerified,

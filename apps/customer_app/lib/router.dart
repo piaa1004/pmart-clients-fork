@@ -19,6 +19,7 @@ import 'features/catalog/presentation/category_screen.dart';
 import 'features/notifications/presentation/notifications_screens.dart';
 import 'features/redelivery/presentation/redelivery_screens.dart';
 import 'features/payment/presentation/payment_screen.dart';
+import 'features/profile/presentation/phone_verification_screen.dart';
 import 'features/profile/presentation/my_info_screen.dart';
 import 'features/reviews/domain/reviews.dart'
     show ReviewEligibility, ReviewTarget;
@@ -244,6 +245,12 @@ final routerProvider = Provider<GoRouter>((ref) {
         path: '/cart/merge',
         builder: (_, state) =>
             CartMergeScreen(guestCartId: state.extra! as String),
+      ),
+      GoRoute(
+        parentNavigatorKey: rootNavigatorKey,
+        // 휴대폰 번호 확인(OCTOMO, customer 0.9.0).
+        path: '/me/phone-verification',
+        builder: (_, _) => const PhoneVerificationScreen(),
       ),
       GoRoute(
         parentNavigatorKey: rootNavigatorKey,

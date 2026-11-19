@@ -11,14 +11,11 @@ const loginProviders = [
   SocialProvider.google,
 ];
 
-/// 실서버가 지금 지원하는 제공자(ADR-0019: Google 먼저. 카카오·네이버는 서버 반영 전 501 UNSUPPORTED_ACTION — BR-65).
-/// 앱 쪽 카카오·네이버 SDK 는 붙어 있다. 서버 반영 전에 SDK 동작만 보려면 빌드에
-/// `--dart-define=PMART_SOCIAL_KAKAO_NAVER=true` 를 준다(로그인은 서버가 거절한다).
+/// 실서버 제공자(auth 0.4.0, ADR-0071 — 카카오·네이버도 Google 과 같은 OIDC ID 토큰).
+/// 카카오는 SDK idToken, 네이버는 OIDC(인가 코드+PKCE) id_token. 서버에 키 설정 전이면 422 CONFIG_REQUIRED → "준비 중".
 const serverLoginProviders = [
-  if (bool.fromEnvironment('PMART_SOCIAL_KAKAO_NAVER')) ...[
-    SocialProvider.kakao,
-    SocialProvider.naver,
-  ],
+  SocialProvider.kakao,
+  SocialProvider.naver,
   SocialProvider.google,
 ];
 

@@ -1,4 +1,4 @@
-// 사본: web/backoffice/src/shared/employeeLabels.ts (30d65dd) — 이 앱에서 따로 고친다(앱 API 를 아는 부품, 지침 §6).
+// 사본: web/backoffice/src/shared/employeeLabels.ts (main 30d65dd) — 이 앱에서 따로 고친다(앱 API 를 아는 부품, 지침 §6).
 // 직원 표시(ADR-0070 덧붙임 2026-11-19 — 백엔드 알림 clients/backoffice/2026-11-19-notice-display-numbers-all).
 // 목록·표·링크에는 OP-… 대신 "이름 · 사번". hr 0.8.0 `GET /hr/employee-labels?operatorIds=`(50개까지, 아는 ID 만 돌려준다).
 // 같은 화면에서 여러 칸이 부르면 한 틱 안의 ID 를 모아 50개씩 한 번에 묻는다(줄마다 요청하지 않게). 결과는 queryKey 로 캐시.

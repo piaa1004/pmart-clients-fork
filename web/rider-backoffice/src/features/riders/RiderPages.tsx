@@ -14,9 +14,10 @@ import { CommandFeedback, QueryState, toUiState, useCommand } from '@pmart/web-u
 import { commandParams } from '../../api/command';
 import type { components } from '../../api/generated/rider';
 import { useApi } from '../../app/ApiContext';
-import { ChipGroup, CursorPager, DataTable, DetailHeader, FieldList, Notice, PageHeader, ResultBar, SearchPanel, SearchRow, Section, SectionTabs, StatCard, StatStrip, StatusBadge, type Tone } from '../../shared/admin';
+import { AllDone, ChipGroup, CursorPager, DataTable, GuideBox, DetailHeader, FieldList, Notice, PageHeader, ResultBar, SearchPanel, SearchRow, Section, SectionTabs, StatCard, StatStrip, StatusBadge, type Tone } from '../../shared/admin';
 import { statText, useListRows } from '../../shared/listKit';
 import { SavedViews } from '../../shared/SavedViews';
+import { ui } from '../../shared/uiMessages';
 import { DeliveryRef, RiderName, RiderRef, StaffName, SystemIds, useDeliveryNumbers, useRiderSummaries } from '../../shared/displayNumbers';
 import { SimBadge } from '../../shared/sim';
 import { useSession } from '../../app/SessionContext';
@@ -41,6 +42,8 @@ const SORTS = Object.keys(rm.search.sortName) as Sort[];
 const REVIEW_STATES = Object.keys(rm.reviews.state) as ReviewState[];
 const reviewTone = (s: string | null | undefined): Tone => (s === 'OPEN' ? 'warning' : s === 'RESTRICTED' ? 'error' : 'ghost');
 const PAGE_SIZE = 20;
+/** 화면 안내 글을 안내 상자 글머리로(문장마다 — 새 문구를 만들지 않는다) */
+const splitGuide = (t: string) => t.split(/(?<=[.요]) (?=\S)/).filter(Boolean);
 
 /** 이 화면에서 더한 문구(2026-11-19 통합 백오피스와 맞추기) */
 const rx = {
@@ -143,15 +146,15 @@ function RiderSearchPage({ signups = false }: { readonly signups?: boolean }) {
       <PageHeader title={signups ? ops.signups.title : r.title} description={signups ? ops.signups.intro : r.intro} actions={signups ? undefined : <SavedViews listKey="riders" />} />
       {signups ? (
         <StatStrip label={rx.stripLabel} testId="signup-strip">
-          <StatCard label={rx.joinedToday} value={statText(st?.joinedToday, failed)} testId="strip-joined-today" />
-          <StatCard label={rx.total} value={statText(st?.total, failed)} to="/riders" testId="strip-total" />
+          <StatCard layout="row" label={rx.joinedToday} value={statText(st?.joinedToday, failed)} testId="strip-joined-today" />
+          <StatCard layout="row" label={rx.total} value={statText(st?.total, failed)} to="/riders" testId="strip-total" />
         </StatStrip>
       ) : (
         <StatStrip label={rx.stripLabel} testId="rider-strip">
-          <StatCard label={rx.total} value={statText(st?.total, failed)} to="/riders" active={!restriction && !filtered} testId="strip-total" />
-          <StatCard label={rx.onDuty} value={statText(st?.onDuty, failed)} hint={rx.accepting(statText(st?.onDutyAcceptingNew, failed))} to="/riders?operatingStatus=ON_DUTY" active={operatingStatus === 'ON_DUTY' && !restriction} testId="strip-on-duty" />
+          <StatCard layout="row" label={rx.total} value={statText(st?.total, failed)} to="/riders" active={!restriction && !filtered} testId="strip-total" />
+          <StatCard layout="row" label={rx.onDuty} value={statText(st?.onDuty, failed)} hint={rx.accepting(statText(st?.onDutyAcceptingNew, failed))} to="/riders?operatingStatus=ON_DUTY" active={operatingStatus === 'ON_DUTY' && !restriction} testId="strip-on-duty" />
           {RESTRICTIONS.filter((x) => x !== 'NORMAL').map((x) => (
-            <StatCard
+            <StatCard layout="row"
               key={x}
               label={label(n.restriction, x)}
               value={statText(st?.byRestriction[x], failed)}
@@ -165,7 +168,19 @@ function RiderSearchPage({ signups = false }: { readonly signups?: boolean }) {
       )}
       {signups && <Notice>{ops.signups.autoNote}</Notice>}
       {!signups && (
-        <SearchPanel onSubmit={submit} onReset={reset} submitLabel={r.search} resetLabel={r.reset}>
+        <SearchPanel
+          onSubmit={submit}
+          onReset={reset}
+          submitLabel={r.search}
+          resetLabel={r.reset}
+          summary={[
+            [rm.riderNumber, riderNumber || (riderId ? '한 라이더' : '')],
+            [r.phone, phone ? '입력함' : ''],
+            [r.restriction, restriction ? label(n.restriction, restriction) : ''],
+            [r.operating, operatingStatus ? label(n.operatingStatus, operatingStatus) : ''],
+            [rm.search.vehicle, vehicleType ? label(n.vehicle, vehicleType) : ''],
+          ]}
+        >
           <SearchRow label={rm.findByNumber}>
             <label className="flex items-center gap-2 text-sm">
               <span className="text-base-content/60">{rm.riderNumber}</span>
@@ -708,7 +723,8 @@ export function RestrictionReviewsMenu() {
   const openCount = openList.data ? String((openList.data.items ?? []).length) : openList.isError ? '?' : undefined;
   return (
     <section className="space-y-4">
-      <PageHeader title={v.title} description={v.intro} />
+      <PageHeader title={v.title} />
+      <GuideBox title={ui.guideTitle} items={splitGuide(v.intro)} storeKey="restriction-reviews" testId="reviews-guide" />
       <ChipGroup
         label={v.title}
         value={state}
@@ -732,69 +748,76 @@ function ReviewTable({ state, riderId }: { readonly state: ReviewState; readonly
   const complaintNos = useDeliveryNumbers((query.data?.items ?? []).flatMap((it) => (it.complaints ?? []).map((c) => c.deliveryId)));
   const me = useSession().session?.subject;
   return (
-    <QueryState state={toUiState(query, (x) => (x.items ?? []).length === 0)} onRetry={() => void query.refetch()} emptyText={riderId ? rm.detailReviews.empty : v.empty}>
-      {(x) => {
-        const items = x.items ?? [];
-        return (
-          <div className="space-y-3">
-            {!riderId && <ResultBar count={items.length} />}
-            <DataTable {...(riderId ? { testId: 'rider-reviews' } : {})}>
-              <thead>
-                <tr>
-                  {!riderId && <th>{v.col.rider}</th>}
-                  <th>{v.col.kind}</th>
-                  <th>{rm.reviews.complaints}</th>
-                  <th>{v.col.openedAt}</th>
-                  <th>{state === 'OPEN' ? v.decide : rm.reviews.closedCol}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {items.map((it, i) => (
-                  // 결정 뒤에도 같은 줄로 남게 reviewId 를 키로
-                  <tr key={it.reviewId ?? `review-${i}`} data-testid="review-row">
-                    {!riderId && (
-                      <td>
-                        <RiderRef riderId={it.riderId} summary={reviewRiders.get(it.riderId ?? '')} />
-                      </td>
-                    )}
-                    <td>
-                      <StatusBadge tone="warning">{label(n.complaintType, it.complaintType)}</StatusBadge>
-                    </td>
-                    <td className="text-xs">
-                      <span className="font-semibold tabular-nums">{rm.reviewsCount((it.complaints ?? []).length)}</span>
-                      <ul className="mt-1 space-y-0.5 text-base-content/60">
-                        {(it.complaints ?? []).map((c, k) => (
-                          <li key={c.complaintId ?? `c-${k}`}>
-                            <span className="inline-flex flex-wrap items-center gap-1">
-                              {c.deliveryId ? <DeliveryRef deliveryId={c.deliveryId} numbers={complaintNos.get(c.deliveryId)} /> : null}
-                              {c.recordedAt ? <span>· {when(c.recordedAt)}</span> : null}
-                            </span>
-                          </li>
-                        ))}
-                      </ul>
-                    </td>
-                    <td className="whitespace-nowrap">{when(it.openedAt)}</td>
-                    <td className="min-w-72">
-                      {it.state === 'OPEN' ? (
-                        <ReviewDecision review={it} />
-                      ) : (
-                        <span className="flex flex-col gap-1 text-sm">
-                          <StatusBadge tone={reviewTone(it.state)}>{label(rm.reviews.state, it.state)}</StatusBadge>
-                          <span className="text-xs text-base-content/60">
-                            {when(it.decidedAt)} · <StaffName operatorId={it.decidedBy} me={me} />
-                            {it.note ? ` — ${it.note}` : ''}
-                          </span>
-                        </span>
-                      )}
-                    </td>
+    <>
+    {/* 할 일이 서버 0건이면 "수고하셨어요"(2026-11-19 통합 백오피스 AllDone) — 읽는 중·실패·거르기를 건 때는 그리지 않는다 */}
+    {!riderId && state === 'OPEN' && query.isSuccess && (query.data.items ?? []).length === 0 ? (
+      <AllDone title={ui.allDone} body={v.empty} testId="reviews-all-done" />
+    ) : (
+      <QueryState state={toUiState(query, (x) => (x.items ?? []).length === 0)} onRetry={() => void query.refetch()} emptyText={riderId ? rm.detailReviews.empty : v.empty}>
+        {(x) => {
+          const items = x.items ?? [];
+          return (
+            <div className="space-y-3">
+              {!riderId && <ResultBar count={items.length} />}
+              <DataTable {...(riderId ? { testId: 'rider-reviews' } : {})}>
+                <thead>
+                  <tr>
+                    {!riderId && <th>{v.col.rider}</th>}
+                    <th>{v.col.kind}</th>
+                    <th>{rm.reviews.complaints}</th>
+                    <th>{v.col.openedAt}</th>
+                    <th>{state === 'OPEN' ? v.decide : rm.reviews.closedCol}</th>
                   </tr>
-                ))}
-              </tbody>
-            </DataTable>
-          </div>
-        );
-      }}
-    </QueryState>
+                </thead>
+                <tbody>
+                  {items.map((it, i) => (
+                    // 결정 뒤에도 같은 줄로 남게 reviewId 를 키로
+                    <tr key={it.reviewId ?? `review-${i}`} data-testid="review-row">
+                      {!riderId && (
+                        <td>
+                          <RiderRef riderId={it.riderId} summary={reviewRiders.get(it.riderId ?? '')} />
+                        </td>
+                      )}
+                      <td>
+                        <StatusBadge tone="warning">{label(n.complaintType, it.complaintType)}</StatusBadge>
+                      </td>
+                      <td className="text-xs">
+                        <span className="font-semibold tabular-nums">{rm.reviewsCount((it.complaints ?? []).length)}</span>
+                        <ul className="mt-1 space-y-0.5 text-base-content/60">
+                          {(it.complaints ?? []).map((c, k) => (
+                            <li key={c.complaintId ?? `c-${k}`}>
+                              <span className="inline-flex flex-wrap items-center gap-1">
+                                {c.deliveryId ? <DeliveryRef deliveryId={c.deliveryId} numbers={complaintNos.get(c.deliveryId)} /> : null}
+                                {c.recordedAt ? <span>· {when(c.recordedAt)}</span> : null}
+                              </span>
+                            </li>
+                          ))}
+                        </ul>
+                      </td>
+                      <td className="whitespace-nowrap">{when(it.openedAt)}</td>
+                      <td className="min-w-72">
+                        {it.state === 'OPEN' ? (
+                          <ReviewDecision review={it} />
+                        ) : (
+                          <span className="flex flex-col gap-1 text-sm">
+                            <StatusBadge tone={reviewTone(it.state)}>{label(rm.reviews.state, it.state)}</StatusBadge>
+                            <span className="text-xs text-base-content/60">
+                              {when(it.decidedAt)} · <StaffName operatorId={it.decidedBy} me={me} />
+                              {it.note ? ` — ${it.note}` : ''}
+                            </span>
+                          </span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </DataTable>
+            </div>
+          );
+        }}
+      </QueryState>
+    )}
+    </>
   );
 }
 

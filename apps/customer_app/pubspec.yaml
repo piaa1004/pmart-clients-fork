@@ -81,7 +81,8 @@ dependencies:
   # 좌표 → 주소는 서버 /address-reverse-geocodes(카카오 로컬, ADR-0023). 위치기반서비스 약관 동의 뒤에만 쓴다(BR-59).
   geolocator: ^14.1.2
   kakao_flutter_sdk_user: ^2.1.0
-  flutter_naver_login: ^2.1.1
+  # 네이버 로그인: OIDC(인가 코드+PKCE)로 id_token — 서버 auth 0.4.0(ADR-0071). 사용자 승인 2026-11-19.
+  flutter_appauth: ^13.0.0
 
 dev_dependencies:
   flutter_test:

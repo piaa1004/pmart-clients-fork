@@ -1,0 +1,69 @@
+/* 공용 움직임(2026-11-19 PC 2 web-common) — 앱 index.css 맨 위에서 @import '../../ui/src/motion.css'; 움직임 줄이기면 모두 끈다 */
+/* 진행 중인 단계 숨쉬기(2026-11-19 사용자 "진행 중인 것들에 다") — 지금 단계 동그라미에서만 고리가 2초마다 천천히 퍼진다.
+   끝난·취소·실패 단계에는 없다(그 단계는 'now' 가 아니다). 움직임 줄이기를 켠 사람에게는 보이지 않는다. */
+@keyframes pmart-step-pulse {
+  0% { transform: scale(1); opacity: 0.55; }
+  70%, 100% { transform: scale(1.75); opacity: 0; }
+}
+.step-pulse {
+  position: absolute;
+  inset: 0;
+  border-radius: 9999px;
+  border: 2px solid currentColor;
+  pointer-events: none;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .step-pulse { animation: pmart-step-pulse 2s ease-out infinite; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .step-pulse { display: none; }
+}
+
+/* ---- 움직임 효과(2026-11-19 "다 넣어") — 지금 일이 벌어지거나 방금 바뀐 곳에만. 움직임 줄이기면 모두 끈다 ---- */
+/* 1 숫자 띠: 방금 바뀐 칸만 잠깐 빛남 */
+@keyframes pmart-changed {
+  0% { box-shadow: 0 0 0 0 color-mix(in oklab, var(--color-primary) 50%, transparent); }
+  100% { box-shadow: 0 0 0 12px transparent; }
+}
+.stat-changed { animation: pmart-changed 1.4s ease-out 2; }
+/* 2 저절로 새로 읽는 목록: 새로 들어온 줄 */
+@keyframes pmart-row-new {
+  0% { background-color: color-mix(in oklab, var(--color-info) 22%, transparent); }
+  100% { background-color: transparent; }
+}
+.row-new > td { animation: pmart-row-new 5s ease-out; }
+/* 4 기한 임박·5 새 메시지: 천천히 숨쉬기 */
+@keyframes pmart-breathe {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+.breathe { animation: pmart-breathe 2s ease-in-out infinite; }
+/* 5 새 메시지가 미끄러져 들어옴 */
+@keyframes pmart-slide-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+.msg-new { animation: pmart-slide-in 0.35s ease-out; }
+@media (prefers-reduced-motion: reduce) {
+  .stat-changed, .row-new > td, .breathe, .msg-new { animation: none !important; }
+}
+/* 3 반영 중 흐르는 막대 — 서버가 아직 일하는 동안만 */
+@keyframes pmart-flow {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(300%); }
+}
+.flow-bar { overflow: hidden; }
+.flow-bar::after {
+  content: '';
+  position: absolute;
+  inset-block: 0;
+  left: 0;
+  width: 33%;
+  background: currentColor;
+  border-radius: 9999px;
+  animation: pmart-flow 1.6s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .flow-bar::after { animation: none; width: 100%; opacity: 0.4; }
+}
+

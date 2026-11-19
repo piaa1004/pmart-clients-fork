@@ -7,8 +7,25 @@ import '../../../shared/providers.dart';
 import '../../auth/domain/auth.dart';
 import '../../auth/presentation/auth_controller.dart';
 import '../data/mock_profile_repository.dart';
+import '../data/phone_verification_repository.dart';
 import '../data/profile_repository.dart';
 import '../domain/profile.dart';
+
+final phoneVerificationRepositoryProvider =
+    Provider<PhoneVerificationRepository>(
+      (ref) => switch (ref.watch(envProvider)) {
+        PmartEnv.mock => MockPhoneVerificationRepository(
+          // 목: 확인되면 목 프로필도 확인됨으로.
+          onVerified: () => switch (ref.read(profileRepositoryProvider)) {
+            final MockProfileRepository m => m.phoneVerified = true,
+            _ => null,
+          },
+        ),
+        PmartEnv.local => ApiPhoneVerificationRepository(
+          ref.watch(dioProvider),
+        ),
+      },
+    );
 
 final profileRepositoryProvider = Provider<ProfileRepository>(
   (ref) => switch (ref.watch(envProvider)) {

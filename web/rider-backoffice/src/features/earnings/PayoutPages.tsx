@@ -103,7 +103,17 @@ export function PayoutsMenu() {
           {done}
         </p>
       )}
-      <SearchPanel onSubmit={submit} onReset={reset} submitLabel={t.search} resetLabel={t.reset}>
+      <SearchPanel
+        onSubmit={submit}
+        onReset={reset}
+        submitLabel={t.search}
+        resetLabel={t.reset}
+        summary={[
+          [t.date, payoutDate],
+          [t.state, state === 'ALL' ? '' : (t.stateName[state] ?? state)],
+          ['라이더', riderId ? (/^\d{6}$/.test(riderId) ? riderId : '한 라이더') : ''],
+        ]}
+      >
         <SearchRow label={t.date}>
           <label className="flex items-center gap-2 text-sm">
             <input type="date" className="input input-sm w-44" aria-label={t.date} value={dateInput} onChange={(ev) => setDateInput(ev.target.value)} />

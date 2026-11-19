@@ -188,14 +188,10 @@ void main() {
     await t.pumpAndSettle();
 
     // 새로 가입한 계정은 내 정보(이름)부터 받는다. 저장 전에는 닫히지 않는다.
-    // 휴대폰 번호 칸은 서버가 연락처 변경을 아직 열지 않아 잠겨 있다(2026-11-03 안내).
+    // 휴대폰 번호는 여기서 보이기만 하고, "번호 확인"(OCTOMO) 화면에서 넣고 확인한다(customer 0.9.0).
     expect(find.text('내 정보 등록'), findsOneWidget);
     expect(find.byKey(const ValueKey('info-later')), findsNothing);
-    expect(
-      t.widget<TextFormField>(find.byKey(const ValueKey('info-phone'))).enabled,
-      isFalse,
-    );
-    expect(find.text('휴대폰 번호 변경은 준비 중이에요. 지금은 이름만 저장돼요'), findsOneWidget);
+    expect(find.byKey(const ValueKey('info-phone-verify')), findsOneWidget);
     await t.tap(find.byKey(const ValueKey('info-save')));
     await t.pumpAndSettle();
     expect(find.text('이름을 입력해 주세요(30자 이내)'), findsOneWidget);

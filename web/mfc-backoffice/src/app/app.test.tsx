@@ -158,14 +158,14 @@ describe('역할', () => {
 });
 
 describe('메뉴', () => {
-  it('홈 + 묶음 5개 · 메뉴 14개가 모두 보이고 센터 주소 아래로 간다', async () => {
+  it('홈 + 묶음 5개 · 메뉴 15개가 모두 보이고 센터 주소 아래로 간다', async () => {
     renderAt('/');
     await screen.findByRole('heading', { name: '오늘 센터 현황' });
     // 묶음 제목(홈은 제목 없이 맨 위)
     const menu = screen.getByRole('navigation', { name: '메뉴' });
     for (const group of ['작업자 관리', '작업', '배송', '재고·품질', '센터']) expect(within(menu).getByText(group, { selector: '[data-group-label]' })).toBeInTheDocument();
-    expect(allMenus).toHaveLength(14);
-    for (const label of ['홈', '작업자', '배정', '작업 현황', '이동·보충', '입고', '재고', '품질', '위치(칸)', '운영 제한', '포장 인계', '배송 현황', '배차 실패', '반납 인증번호']) {
+    expect(allMenus).toHaveLength(15);
+    for (const label of ['홈', '작업자', '배정', '작업 현황', '이동·보충', '입고', '재고', '품질', '위치(칸)', '운영 제한', '포장 인계', '배송 현황', '배차 실패', '배차 지연', '반납 인증번호']) {
       // 작업 현황 옆에는 늦음·막힘 수 배지가 붙을 수 있다
       const link = screen.getByRole('link', { name: (name) => name === label || (label === '작업 현황' && /^작업 현황 \d+\+?$/.test(name)) });
       expect(link.getAttribute('href')).toMatch(/^\/c\/MFC-BSN-01\//);

@@ -10,9 +10,13 @@ import { request } from '@pmart/web-core';
 import { CommandFeedback, QueryState, toUiState, useCommand } from '@pmart/web-ui';
 import { commandParams } from '../../api/command';
 import { useApi } from '../../app/ApiContext';
-import { ChipGroup, CursorPager, FieldList, PageHeader, ResultBar, SearchPanel, SearchRow, StatCard, StatStrip, StatusBadge, type Tone } from '../../shared/admin';
+import { AllDone, ChipGroup, CursorPager, FieldList, GuideBox, PageHeader, ResultBar, SearchPanel, SearchRow, StatCard, StatStrip, StatusBadge, type Tone } from '../../shared/admin';
 import { statText } from '../../shared/listKit';
 import { SavedViews } from '../../shared/SavedViews';
+import { ui } from '../../shared/uiMessages';
+
+/** 화면 안내 글을 안내 상자 글머리로(문장마다 — 새 문구를 만들지 않는다) */
+const splitGuide = (t: string) => t.split(/(?<=[.요]) (?=\S)/).filter(Boolean);
 
 /** 숫자 띠(2026-11-19 통합 백오피스처럼) — 서버가 센 수(delivery-stats, 센터 무관) */
 function useEarningStats() {
@@ -65,9 +69,10 @@ export function AdjustmentsMenu() {
   const stats = useEarningStats();
   return (
     <section className="max-w-[1600px] space-y-4">
-      <PageHeader title={e.adjustTitle} description={e.adjustIntro} />
+      <PageHeader title={e.adjustTitle} />
+      <GuideBox title={ui.guideTitle} items={splitGuide(e.adjustIntro)} storeKey="adjustments" testId="adjust-guide" />
       <StatStrip label="조정 대기 수" testId="adjust-strip">
-        <StatCard label="조정 기다림" value={statText(stats.data?.adjustmentPending, stats.isError)} hint="산정 불가 수행료" tone={(stats.data?.adjustmentPending ?? 0) > 0 ? 'warning' : undefined} testId="strip-adjustment" />
+        <StatCard layout="row" label="조정 기다림" value={statText(stats.data?.adjustmentPending, stats.isError)} hint="산정 불가 수행료" tone={(stats.data?.adjustmentPending ?? 0) > 0 ? 'warning' : undefined} testId="strip-adjustment" />
       </StatStrip>
       {onlyDelivery && (
         <p role="note" className="alert flex flex-wrap justify-between text-sm" data-testid="adjust-only">
@@ -77,44 +82,49 @@ export function AdjustmentsMenu() {
           </button>
         </p>
       )}
-      <QueryState
-        state={toUiState(queue, (x) => (x.items ?? []).filter((it) => !onlyDelivery || it.deliveryId === onlyDelivery).length === 0)}
-        onRetry={() => void queue.refetch()}
-        emptyText={onlyDelivery ? e.notInQueue : e.empty}
-      >
-        {(all) => {
-          const x = { ...all, items: (all.items ?? []).filter((it) => !onlyDelivery || it.deliveryId === onlyDelivery) };
-          return (
-          <div className="space-y-3">
-            <ResultBar count={(x.items ?? []).length} more={!!x.page?.nextCursor} />
-            <ul className="space-y-3">
-              {(x.items ?? []).map((it) => (
-                <ItemCard
-                  key={it.earningId}
-                  testId="adjustment-row"
-                  head={
-                    <>
-                      <StatusBadge tone="warning">산정 불가</StatusBadge>
-                      <DeliveryRef deliveryId={it.deliveryId} numbers={deliveryNos.get(it.deliveryId ?? '')} />
-                    </>
-                  }
-                  at={when(it.recordedAt)}
-                  action={<AdjustForm earningId={it.earningId ?? ''} onDone={() => void queryClient.invalidateQueries({ queryKey: ['adjustment-queue'] })} />}
-                >
-                  <FieldList
-                    rows={[
-                      [e.col.rider, <RiderRef riderId={it.riderId} summary={riders.get(it.riderId ?? '')} />],
-                      it.note ? [e.col.note, humanizeCodes(it.note)] : null,
-                    ]}
-                  />
-                  <SystemIds ids={[[sysLabel.earning, it.earningId], [sysLabel.delivery, it.deliveryId], [sysLabel.rider, it.riderId]]} />
-                </ItemCard>
-              ))}
-            </ul>
-          </div>
-          );
-        }}
-      </QueryState>
+      {/* 할 일이 서버 0건이면 "수고하셨어요"(2026-11-19 통합 백오피스 AllDone) — 읽는 중·실패·거르기를 건 때는 그리지 않는다 */}
+      {!onlyDelivery && queue.isSuccess && (queue.data.items ?? []).length === 0 ? (
+        <AllDone title={ui.allDone} body={e.empty} testId="adjust-all-done" />
+      ) : (
+        <QueryState
+          state={toUiState(queue, (x) => (x.items ?? []).filter((it) => !onlyDelivery || it.deliveryId === onlyDelivery).length === 0)}
+          onRetry={() => void queue.refetch()}
+          emptyText={onlyDelivery ? e.notInQueue : e.empty}
+        >
+          {(all) => {
+            const x = { ...all, items: (all.items ?? []).filter((it) => !onlyDelivery || it.deliveryId === onlyDelivery) };
+            return (
+            <div className="space-y-3">
+              <ResultBar count={(x.items ?? []).length} more={!!x.page?.nextCursor} />
+              <ul className="space-y-3">
+                {(x.items ?? []).map((it) => (
+                  <ItemCard
+                    key={it.earningId}
+                    testId="adjustment-row"
+                    head={
+                      <>
+                        <StatusBadge tone="warning">산정 불가</StatusBadge>
+                        <DeliveryRef deliveryId={it.deliveryId} numbers={deliveryNos.get(it.deliveryId ?? '')} />
+                      </>
+                    }
+                    at={when(it.recordedAt)}
+                    action={<AdjustForm earningId={it.earningId ?? ''} onDone={() => void queryClient.invalidateQueries({ queryKey: ['adjustment-queue'] })} />}
+                  >
+                    <FieldList
+                      rows={[
+                        [e.col.rider, <RiderRef riderId={it.riderId} summary={riders.get(it.riderId ?? '')} />],
+                        it.note ? [e.col.note, humanizeCodes(it.note)] : null,
+                      ]}
+                    />
+                    <SystemIds ids={[[sysLabel.earning, it.earningId], [sysLabel.delivery, it.deliveryId], [sysLabel.rider, it.riderId]]} />
+                  </ItemCard>
+                ))}
+              </ul>
+            </div>
+            );
+          }}
+        </QueryState>
+      )}
     </section>
   );
 }
@@ -222,11 +232,21 @@ export function SurchargesMenu() {
   };
   return (
     <section className="max-w-[1600px] space-y-4">
-      <PageHeader title={e.surchargeTitle} description={e.surchargeIntro} actions={<SavedViews listKey="surcharges" />} />
+      <PageHeader title={e.surchargeTitle} actions={<SavedViews listKey="surcharges" />} />
+      <GuideBox title={ui.guideTitle} items={splitGuide(e.surchargeIntro)} storeKey="surcharges" testId="surcharge-guide" />
       <StatStrip label="추가 배달료 신청 수" testId="surcharge-strip">
-        <StatCard label="처리 전 신청" value={statText(stats.data?.surchargeRequested, stats.isError)} to="/surcharges" active={state === 'REQUESTED' && !riderId} tone={(stats.data?.surchargeRequested ?? 0) > 0 ? 'warning' : undefined} testId="strip-surcharge" />
+        <StatCard layout="row" label="처리 전 신청" value={statText(stats.data?.surchargeRequested, stats.isError)} to="/surcharges" active={state === 'REQUESTED' && !riderId} tone={(stats.data?.surchargeRequested ?? 0) > 0 ? 'warning' : undefined} testId="strip-surcharge" />
       </StatStrip>
-      <SearchPanel onSubmit={submit} onReset={reset} submitLabel={f.search} resetLabel={f.reset}>
+      <SearchPanel
+        onSubmit={submit}
+        onReset={reset}
+        submitLabel={f.search}
+        resetLabel={f.reset}
+        summary={[
+          [f.state, state === 'REQUESTED' ? '' : state === 'ALL' ? f.all : (f.stateName[state] ?? state)],
+          ['라이더', riderId ? (/^\d{6}$/.test(riderId) ? riderId : '한 라이더') : ''],
+        ]}
+      >
         <SearchRow label={f.state}>
           <ChipGroup
             label={f.state}
@@ -242,57 +262,62 @@ export function SurchargesMenu() {
           </label>
         </SearchRow>
       </SearchPanel>
-      <QueryState state={toUiState(list, (x) => (x.items ?? []).length === 0)} onRetry={() => void list.refetch()} emptyText={e.surchargeEmpty}>
-        {(x) => {
-          const nextCursor = x.page?.nextCursor ?? null;
-          return (
-            <div className="space-y-3">
-              <ResultBar count={(x.items ?? []).length} more={!!nextCursor} />
-              <ul className="space-y-3">
-                {(x.items ?? []).map((it) => (
-                  <ItemCard
-                    key={it.requestId}
-                    testId="surcharge-row"
-                    head={
-                      <>
-                        <StatusBadge tone={surchargeTone(it.state)}>{f.stateName[it.state] ?? it.state}</StatusBadge>
-                        <DeliveryRef deliveryId={it.deliveryId} numbers={deliveryNos.get(it.deliveryId)} />
-                      </>
-                    }
-                    at={`${e.scol.requestedAt} ${when(it.requestedAt)}`}
-                    action={
-                      it.state === 'REQUESTED' ? (
-                        <SurchargeDecision requestId={it.requestId} onDone={() => void queryClient.invalidateQueries({ queryKey: ['surcharge-requests'] })} />
-                      ) : (
-                        <div className="text-sm" data-testid="surcharge-decided">
-                          <p className="text-base-content/70">
-                            <span className="mr-2 font-medium text-base-content">처리</span>
-                            {f.decidedLine(f.stateName[it.state] ?? it.state, when(it.decidedAt))} <StaffName operatorId={it.decidedBy} me={me} />
-                          </p>
-                          {it.decisionNote && <p className="mt-1 whitespace-pre-wrap">{it.decisionNote}</p>}
-                        </div>
-                      )
-                    }
-                  >
-                    <div className="grid gap-4 md:grid-cols-[1fr_auto]">
-                      <FieldList
-                        rows={[
-                          [e.scol.rider, <RiderRef riderId={it.riderId} summary={riders.get(it.riderId)} />],
-                          [e.scol.floor, `${it.floor}층`],
-                          [e.scol.amount, <span className="font-semibold">{won(it.amount)}</span>],
-                        ]}
-                      />
-                      <SurchargePhotos deliveryId={it.deliveryId} refs={it.evidenceRefs ?? []} />
-                    </div>
-                    <SystemIds ids={[[sysLabel.surcharge, it.requestId], [sysLabel.delivery, it.deliveryId], [sysLabel.rider, it.riderId]]} />
-                  </ItemCard>
-                ))}
-              </ul>
-              <CursorPager hasPrev={!!cursor} nextCursor={nextCursor} onFirst={() => patch({ cursor: '' })} onNext={(c) => patch({ cursor: c })} />
-            </div>
-          );
-        }}
-      </QueryState>
+      {/* 할 일이 서버 0건이면 "수고하셨어요"(2026-11-19 통합 백오피스 AllDone) — 읽는 중·실패·거르기를 건 때는 그리지 않는다 */}
+      {state === 'REQUESTED' && !riderId && !cursor && list.isSuccess && (list.data.items ?? []).length === 0 ? (
+        <AllDone title={ui.allDone} body={e.surchargeEmpty} testId="surcharge-all-done" />
+      ) : (
+        <QueryState state={toUiState(list, (x) => (x.items ?? []).length === 0)} onRetry={() => void list.refetch()} emptyText={e.surchargeEmpty}>
+          {(x) => {
+            const nextCursor = x.page?.nextCursor ?? null;
+            return (
+              <div className="space-y-3">
+                <ResultBar count={(x.items ?? []).length} more={!!nextCursor} />
+                <ul className="space-y-3">
+                  {(x.items ?? []).map((it) => (
+                    <ItemCard
+                      key={it.requestId}
+                      testId="surcharge-row"
+                      head={
+                        <>
+                          <StatusBadge tone={surchargeTone(it.state)}>{f.stateName[it.state] ?? it.state}</StatusBadge>
+                          <DeliveryRef deliveryId={it.deliveryId} numbers={deliveryNos.get(it.deliveryId)} />
+                        </>
+                      }
+                      at={`${e.scol.requestedAt} ${when(it.requestedAt)}`}
+                      action={
+                        it.state === 'REQUESTED' ? (
+                          <SurchargeDecision requestId={it.requestId} onDone={() => void queryClient.invalidateQueries({ queryKey: ['surcharge-requests'] })} />
+                        ) : (
+                          <div className="text-sm" data-testid="surcharge-decided">
+                            <p className="text-base-content/70">
+                              <span className="mr-2 font-medium text-base-content">처리</span>
+                              {f.decidedLine(f.stateName[it.state] ?? it.state, when(it.decidedAt))} <StaffName operatorId={it.decidedBy} me={me} />
+                            </p>
+                            {it.decisionNote && <p className="mt-1 whitespace-pre-wrap">{it.decisionNote}</p>}
+                          </div>
+                        )
+                      }
+                    >
+                      <div className="grid gap-4 md:grid-cols-[1fr_auto]">
+                        <FieldList
+                          rows={[
+                            [e.scol.rider, <RiderRef riderId={it.riderId} summary={riders.get(it.riderId)} />],
+                            [e.scol.floor, `${it.floor}층`],
+                            [e.scol.amount, <span className="font-semibold">{won(it.amount)}</span>],
+                          ]}
+                        />
+                        <SurchargePhotos deliveryId={it.deliveryId} refs={it.evidenceRefs ?? []} />
+                      </div>
+                      <SystemIds ids={[[sysLabel.surcharge, it.requestId], [sysLabel.delivery, it.deliveryId], [sysLabel.rider, it.riderId]]} />
+                    </ItemCard>
+                  ))}
+                </ul>
+                <CursorPager hasPrev={!!cursor} nextCursor={nextCursor} onFirst={() => patch({ cursor: '' })} onNext={(c) => patch({ cursor: c })} />
+              </div>
+            );
+          }}
+        </QueryState>
+      )}
     </section>
   );
 }

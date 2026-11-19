@@ -1,4 +1,4 @@
-// 사본: web/backoffice/src/shared/motion.tsx (e6a7bdb) — 이 앱에서 따로 고친다. web-ui 로 옮겨질 예정(PC 2, 2026-11-19 지침 all/2026-11-19-request-ui-ux-align §0).
+// 사본: web/backoffice/src/shared/motion.tsx (main e6a7bdb) — 이 앱에서 따로 고친다. web-ui 로 옮겨질 예정(지침 all/2026-11-19-request-ui-ux-align §0).
 // 움직임 효과 공통(2026-11-19 사용자 "이런 효과를 넣을 만한 곳 — 다 넣어"). 원칙: 지금 일이 벌어지고 있거나 방금 바뀐 곳에만.
 // 바뀜 판단은 서버가 준 값의 변화만 본다(화면이 숫자를 만들지 않는다). 움직임 줄이기 설정이면 CSS 가 끈다(index.css).
 import { type ReactNode, useEffect, useRef, useState } from 'react';

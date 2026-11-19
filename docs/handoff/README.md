@@ -36,6 +36,7 @@ pmart-clients 와 pmart-backend 는 서로의 저장소에 쓰지 않는다. 각
 | `mfc-backoffice/2026-11-17-backend-lists-and-roles.md` | 회신 `clients/mfc-backoffice/2026-11-18-reply-lists-and-roles.md` — MB-1 목록 9개·MB-3 확인 필요 포장 관리자 **화면 반영**(`mfc-backoffice/mb1-lists`, 2026-11-19). MB-2 는 사용자 답(1~4)과 API 요청을 `mfc-backoffice/2026-11-19-backend-quality-incidents.md` 로 보냄. 남은 것: LAN 확인(`stock-units` 게이트웨이 라우트) |
 | `mfc-backoffice/2026-11-19-backend-quality-incidents.md` | 회신 `clients/mfc-backoffice/2026-11-19-reply-quality-incidents.md`(quality 0.6.0·inventory 0.27.0, R6 은 2차) — 화면 반영 `mfc-backoffice/quality-incidents`(2026-11-19). 품질 사고(MB-2) — 사용자 결정(자동+직접 등록, 결품은 파손·변질만, LOT 처리 뒤 관리자가 닫음, 고객 영향이면 case 자동) + R1 조회 구현·R2 직접 등록·R3 자동·R4 상태·R5 닫기·R6 case. 질문 5 상품 취급은 지금대로 + R7 단종은 본사가 전 센터 OFF·R8 신상품은 센터 화면 배너 안내 |
 | `mfc-backoffice/2026-11-19-backend-ops-exceptions.md` | 센터 운영판(§4-0) — OE-1 센터 결품 보고 목록(+전체 건수), OE-2 출하 약속 초과·임박 건수·임박 기준. 회신 전에는 결품(SHORT) 행 없이 안내, 약속 건수는 작업 목록 1,000건까지 읽어 셈 |
+| `mfc-backoffice/2026-11-19-backend-dispatch-cancel-lines.md` | "배차 불가로 취소"(claim CL-5) — 센터 관리자가 주문 행·미이행 수량을 못 읽음. DC-1 서버가 lines 채우기(추천)·DC-2 order 직원 조회를 MFC_SUPERVISOR 에게. 회신 전에는 단추 막음 |
 | `mfc-backoffice/2026-11-19-backend-display-labels.md` | 포장 화면 번호(ADR-0070 덧붙임) — DL-1 인계 판정·확인 필요 포장에 `handoverCode`·`orderNumber`, DL-2 bff 포장 인계 `packages[].handoverCode`. 회신 전에는 포장대 위치·"포장 n" |
 | `all/2026-11-19-reply-ui-ux-align-mfc-backoffice.md` | (mfc-backoffice → PC 2) UI·UX 맞추기 지침 회신 — 반영 목록, web-ui 공용 동의·필요 순서. PC 2 가 공용 부품을 올리면 바꿔 끼우고 archive |
 | `mfc-backoffice/2026-11-18-backend-my-account.md` | 직원 "내 정보" — 회신 `clients/mfc-backoffice/2026-11-18-reply-my-account.md`: 사용자 정정으로 비밀번호 = 센터 휴게 번호(capacity 0.20.0), 연락처 = 연락 수단 표시용(capacity 0.21.0 `staff-contacts`), EA-3·HR-3 철회. 화면 반영 `mfc-backoffice/my-info-contacts`(2026-11-19). **남은 것: LAN 확인 뒤 archive** |
@@ -43,6 +44,8 @@ pmart-clients 와 pmart-backend 는 서로의 저장소에 쓰지 않는다. 각
 | `customer-app/2026-11-19-backend-first-run-consents.md` | BR-59 처음 실행 약관 — ①~④ 모두 회신(`clients/customer-app/2026-11-19-reply-br59-first-run-consents.md`, customer 0.6.0~0.6.1) · 고객앱 반영(목 모드). 질문 답은 아래 문서로 보냄. **남은 것: LAN 실서버 확인 뒤 archive** |
 | `customer-app/2026-11-19-backend-br59-location-service-answer.md` | BR-59 질문 답(좌표→주소 카카오 로컬 서버 경유, 지도 카카오맵 SDK, 휴대폰 위치 Android geolocator — 사용자 승인·고객앱 반영) + Q1 역지오코딩 좌표가 URL 쿼리로 추적 기록에 남는 문제 |
 | `customer-app/2026-11-19-backend-address-receiver-to-checkout.md` | BR-60 — 회신(`clients/customer-app/2026-11-19-reply-br60-address-receiver.md`, customer 0.8.0·order 0.14.0 배포) · 고객앱 반영(목 모드). **남은 것: LAN 에서 주소 저장·주문서 내 연락처 확인 뒤 archive** |
+| `customer-app/2026-11-19-backend-phone-verification-signup.md` | BR-64 나머지 — 0.9.0 휴대폰 확인 화면 반영 알림 + 가입 단계 확인(R1)·한 번호 한 계정(R2)·기존 계정 안내(R3)·탈퇴 1달(R4)·기존 회원(R5)·주문 연락처(R6)·처리방침(R7) |
+| `customer-app/2026-11-19-backend-naver-oauth-callback-relay.md` | BR-66 네이버 로그인 콜백 중계 — LAN 게이트웨이 공개 경로 → 앱 주소 302(고정 목적지·기록 없음), 콘솔에 넣을 주소·인증서 |
 | `customer-app/2026-11-19-backend-social-login-identity.md` | BR-64 가입 즉시 휴대폰 본인 인증(옥토모)·한 번호 한 계정·기존 계정 안내·탈퇴 1달, BR-65 카카오·네이버 로그인 |
 | `customer-app/2026-11-19-backend-rating-null-in-cards.md` | BR-63 홈 진열·상세 응답 평점 null(집계는 480) — 사본 채우기 |
 | `customer-app/2026-11-19-backend-delivery-status-screen.md` | **급함** 배송 현황 — R1(BR-61) 주문 `shipments[].deliveryId`(없어서 라이더가 지도에 안 뜸), R2(BR-62) 주문한 센터 이름 |

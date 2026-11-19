@@ -106,47 +106,60 @@ describe('직접 배정', () => {
   });
 });
 
-describe('배정 추천', () => {
-  async function calculate(view: ReturnType<typeof renderAt>) {
-    await userEvent.click(await screen.findByRole('button', { name: '추천 계산' }));
-    await screen.findByRole('heading', { level: 1, name: /^배정 추천 · / });
-    return postsTo(view.sent, '/assignment-plans')[0]!;
-  }
-
-  it('계산 → 추천 화면(배정은 아직 그대로) → 확정하면 배정이 생긴다', async () => {
-    const view = renderAt('/c/MFC-BSN-01/assignments?tab=plan');
-    expect(await within(await screen.findByTestId('list-plans')).findByText('조건에 맞는 항목이 없어요')).toBeInTheDocument();
-    const post = await calculate(view);
-    expect(await sentBody(post)).toEqual({ mfcId: 'MFC-BSN-01', horizonMinutes: 60 });
-    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('추천됨(확정 전)');
-    const items = screen.getAllByTestId('plan-item');
-    expect(within(items[0]!).getByTestId('task-link')).toHaveAttribute('href', '/c/MFC-BSN-01/tasks/TASK-PICK-2');
-    expect(within(items[0]!).getByText('OP-wkr-1')).toBeInTheDocument();
-    expect(db.assignments.some((a) => a.taskId === 'TASK-PICK-2')).toBe(false);
-    await userEvent.click(screen.getByRole('button', { name: '추천 확정' }));
-    expect(await screen.findByText('추천을 확정했어요.')).toBeInTheDocument();
-    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('확정됨');
-    expect(db.assignments.some((a) => a.taskId === 'TASK-PICK-2' && a.state === 'ACTIVE')).toBe(true);
+describe('작업 시작(capacity 0.22.0) — 누르면 추천대로 바로 배정', () => {
+  it('commit: true 로 보내고, 결과 요약(배정·남은 작업), 지금 배정·작업 목록에 보인다', async () => {
+    const view = renderAt('/c/MFC-BSN-01/assignments');
+    const card = await screen.findByTestId('start-work');
+    await userEvent.selectOptions(within(card).getByRole('combobox', { name: '나눌 일감' }), '120');
+    await userEvent.click(within(card).getByRole('button', { name: '작업 시작' }));
+    const result = await within(card).findByTestId('start-result');
+    expect(result).toHaveTextContent('1건 배정했어요');
+    const post = postsTo(view.sent, '/assignment-plans')[0]!;
+    expect(await sentBody(post)).toEqual({ mfcId: 'MFC-BSN-01', horizonMinutes: 120, commit: true });
+    expect(post.headers.get('Idempotency-Key')).toBeTruthy();
+    expect(db.assignments.some((a) => a.taskId === 'TASK-PICK-2' && a.state === 'ACTIVE' && a.source === 'PLAN')).toBe(true);
+    expect(db.tasks.get('TASK-PICK-2')!.state).toBe('ASSIGNED');
+    // 지금 배정 목록을 다시 읽어 새 배정이 보인다
+    await waitFor(() => expect(rows().some((r) => within(r).queryByTestId('task-link')?.getAttribute('href') === '/c/MFC-BSN-01/tasks/TASK-PICK-2')).toBe(true));
   });
 
-  it('그 사이 작업이 바뀌면 확정하지 않고(409 PLAN_STALE) 낡은 이유를 보인다', async () => {
-    const view = renderAt('/c/MFC-BSN-01/assignments?tab=plan');
-    await calculate(view);
-    db.tasks.set('TASK-PICK-2', { ...db.tasks.get('TASK-PICK-2')!, state: 'ASSIGNED' });
-    await userEvent.click(screen.getByRole('button', { name: '추천 확정' }));
-    await waitFor(() => expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('낡음 — 다시 계산'));
-    // 거절 문구는 계획을 다시 읽은 뒤(STALE)에도 남는다
-    await waitFor(() => expect(screen.getByText('그 사이 바뀐 작업이 있어 확정하지 않았어요. 다시 계산해 주세요.')).toBeInTheDocument());
-    expect(screen.queryByRole('button', { name: '추천 확정' })).not.toBeInTheDocument();
-    expect(screen.getByTestId('stale-reasons')).toHaveTextContent('TASK-PICK-2');
-    expect(db.assignments.some((a) => a.taskId === 'TASK-PICK-2')).toBe(false);
+  it('서버가 STALE 이면 "다시 시작" 안내, 배정할 것이 없으면 그렇게', async () => {
+    server.use(http.post(`${API_BASE}/assignment-plans`, () => HttpResponse.json({ planId: 'PLAN-S', mfcId: 'MFC-BSN-01', state: 'STALE', staleReasons: ['TASK_CHANGED:TASK-PICK-2'], assignments: [], unassigned: [] }, { status: 201 })));
+    renderAt('/c/MFC-BSN-01/assignments');
+    const card = await screen.findByTestId('start-work');
+    await userEvent.click(within(card).getByRole('button', { name: '작업 시작' }));
+    expect(await within(card).findByTestId('start-result')).toHaveTextContent('다시 눌러 주세요');
+    server.use(
+      http.post(`${API_BASE}/assignment-plans`, () =>
+        HttpResponse.json({ planId: 'PLAN-N', mfcId: 'MFC-BSN-01', state: 'NO_SOLUTION', assignments: [], unassigned: [{ taskId: 'T-1', taskType: 'PACK', reason: 'CONFIG_REQUIRED' }] }, { status: 201 }),
+      ),
+    );
+    await userEvent.click(within(card).getByRole('button', { name: '작업 시작' }));
+    const r = await within(card).findByText('지금 배정할 수 있는 작업·작업자가 없어요.');
+    expect(r.closest('[data-testid="start-result"]')).toHaveTextContent('작업 시간 설정 필요 1건');
   });
 
-  it('계산 범위는 10~480분만 보낸다', async () => {
+  it('담당 없는 작업: 대기 작업마다 "담당 정하기" — 버전 0 으로 배정', async () => {
+    const view = renderAt('/c/MFC-BSN-01/assignments?tab=unassigned');
+    const box = await screen.findByTestId('unassigned-tasks');
+    const row = (await within(box).findAllByTestId('unassigned-row'))[0]!;
+    expect(row).toHaveTextContent('피킹');
+    await userEvent.click(within(row).getByRole('button', { name: '담당 정하기' }));
+    const form = await screen.findByRole('form', { name: /담당 바꾸기/ });
+    const combo = within(form).getByRole('combobox', { name: '새 담당' });
+    await userEvent.click(combo);
+    await userEvent.click(within(screen.getByRole('listbox', { name: '새 담당' })).getAllByRole('option')[0]!);
+    await userEvent.type(within(form).getByRole('textbox', { name: '사유' }), '대기 정리');
+    await userEvent.click(within(form).getByRole('button', { name: '담당 바꾸기' }));
+    await within(form).findByRole('status');
+    const post = postsTo(view.sent, '/assignments').at(-1)!;
+    expect(post.headers.get('X-Expected-Version')).toBe('0');
+    expect((await sentBody(post))['taskId']).toBe('TASK-PICK-2');
+  });
+
+  it('지난 작업 시작은 보기만 — 추천만 계산하는 단추는 없다', async () => {
     renderAt('/c/MFC-BSN-01/assignments?tab=plan');
-    const input = await screen.findByRole('spinbutton', { name: /계산 범위/ });
-    await userEvent.clear(input);
-    await userEvent.type(input, '600');
-    expect(screen.getByRole('button', { name: '추천 계산' })).toBeDisabled();
+    expect(await screen.findByTestId('list-plans')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '추천 계산' })).not.toBeInTheDocument();
   });
 });

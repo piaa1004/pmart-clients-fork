@@ -14,6 +14,9 @@ final class MockProfileRepository implements ProfileRepository {
   /// 등록된 휴대폰 번호(숫자). 서버처럼 가린 값과 본인용 원래 값을 같이 돌려준다(customer 0.7.0 — BR-32).
   String? phone;
 
+  /// 번호 확인(OCTOMO)됨 — 번호를 바꾸면 다시 false.
+  bool phoneVerified = false;
+
   /// 다음 연락처 저장을 400(옛 서버처럼)으로 만든다.
   bool rejectPhone = false;
 
@@ -51,6 +54,7 @@ final class MockProfileRepository implements ProfileRepository {
       nickname: nickname,
       phoneMasked: phone == null ? null : mask(phone!),
       phone: phone,
+      phoneVerified: phoneVerified,
       name: name,
       email: email,
       emailVerified: emailVerified,
@@ -86,7 +90,9 @@ final class MockProfileRepository implements ProfileRepository {
       if (rejectPhone || (digits.isNotEmpty && !PhoneInput.valid(digits))) {
         return const ProfileChangeRejected(ProblemCode.validationFailed);
       }
-      this.phone = digits.isEmpty ? null : digits;
+      final next = digits.isEmpty ? null : digits;
+      if (next != this.phone) phoneVerified = false;
+      this.phone = next;
     }
     if (nickname != null) this.nickname = nickname;
     _version++;

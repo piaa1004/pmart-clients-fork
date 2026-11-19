@@ -1,4 +1,4 @@
-// 사본: web/backoffice/src/shared/SeenMark.tsx (3222d26) — 이 앱에서 따로 고친다.
+// 사본: web/backoffice/src/shared/SeenMark.tsx (main 3222d26) — 이 앱에서 따로 고친다.
 // 목록 줄의 "최근 봄" 표시(2026-11-19) — 이 브라우저에서 최근 열어 본 것(shared/recentViews, 8개까지). 서버 상태가 아니다
 import { ui } from './uiMessages';
 

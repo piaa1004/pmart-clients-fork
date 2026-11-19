@@ -143,6 +143,11 @@
 | 추천 화면 `assignments/plans/<planId>` | `GET /assignment-plans/{id}`, `POST …/commits` | 상태·계산 결과·평가(못 넣음·늦음·최대 부하)·한계(limitations)·근무 미등록 작업자·추천 배정·못 넣은 작업(사유). PROPOSED 만 확정 단추. 409 `PLAN_STALE` 이면 계획을 다시 읽어 STALE·낡은 이유를 보인다(아무것도 배정 안 됨) |
 - 계산 입력(`…/input`)은 아직 화면에 넣지 않았다(재현 디버그용).
 
+### 4-6b. 작업 시작 — mfc-capacity 0.22.0 (`features/assignments/StartWork.tsx`, 2026-11-19 PC 3)
+- 백엔드 알림 `clients/mfc-backoffice/2026-11-19-notice-start-work.md` — 사용자 결정 "배정 추천 화면을 따로 두지 않는다".
+- 배정 화면 맨 위 "작업 시작"(앞으로 30·60·120·240분) = `POST /assignment-plans` `{mfcId, horizonMinutes, commit: true}` → 결과 요약(서버 상태 그대로: 배정 N건·남은 작업 사유별, STALE 이면 "다시 눌러 주세요", NO_SOLUTION). 끝나면 배정·작업 목록·홈을 다시 읽는다.
+- 탭: 지금 배정(행마다 담당 바꾸기 → 직접 배정) · **담당 없는 작업**(fulfillment `GET /tasks?state=READY` — 줄마다 "담당 정하기", 작업 현황과 같은 폼, 버전 0) · 직접 배정 · 지난 작업 시작(보기만 — "추천 계산"만 하는 단추는 뺐다).
+
 ### 4-7. 입고 — mfc-inbound-service 0.9.0 (`features/inbound/InboundPages.tsx`·`InboundOtherTabs.tsx`)
 탭은 URL 쿼리 `tab`(입고 작업 기본 · `initial` · `returns` · `supply` · `promises`). 화면 요청 근거: 백엔드 handoff `all/2026-11-07-clients-request-mfc-inbound-screens.md` B2~B4.
 
@@ -250,6 +255,12 @@
 - 목 작업(`MFC-BSN-01`): 피킹 진행 중(멈춤, 출하 SHP-1 — 포장 PKG-1 밀봉·허가 만료), 포장 담당, 피킹 대기(담당 없음), 피킹 막힘, 피킹 끝남, 복귀 진행 중(늦음·재고 확정 대기 실적 1).
 - 목 위치: `MFC-BSN-01` 에 사용 중 3·닫힘 2(하나는 재고가 남아 폐지 거절)·폐지 1, `MFC-SEL-01` 에 1.
 - 목 모드는 새로고침하면 목 서버 기억이 지워져 다시 로그인해야 한다(화면 안 링크로 옮겨 다닌다).
+
+### 4-4d. 배차 지연 — delivery-dispatch 0.12.0 `GET /dispatch-delays?mfcId=` (`features/delivery/DispatchDelayPage.tsx`, 2026-11-19 PC 3)
+- 백엔드 요청 `clients/mfc-backoffice/2026-11-19-request-dispatch-delays.md`(원문 Delivery §3.6). 지연 안내가 난 픽업 전 배송, 약속 이른 순, 30초마다.
+- 칸: 배송 번호(execution `GET /deliveries?deliveryIds=&mfcId=` 50개씩 — 없으면 "번호 없음", 조회 실패면 "번호 확인 불가"), 배차 상태, 라이더(없으면 "라이더 없음"), 약속 시각, 약속 대비(지금 − 약속, 지났으면 빨강 숨쉬기), 지연 안내 시각, 시스템 번호(배송·주문).
+- "배차 불가로 취소"(claim 0.7.0 CL-5)는 **막아 둠** — 주문 행·미이행 수량을 센터 관리자가 읽을 API 가 없다. 요청 `docs/handoff/mfc-backoffice/2026-11-19-backend-dispatch-cancel-lines.md`(DC-1 서버가 행 채우기 추천).
+- 홈 숫자 칸 "배차 지연(픽업 전)" → 이 메뉴.
 
 ### 4-4c. 반납 인증번호 — delivery-execution 0.28.0 `/return-handovers*` (`features/delivery/ReturnHandoverPage.tsx`, 2026-11-19 PC 3)
 - 회수·반납 배송이 MFC 로 올 때 라이더에게 알려 줄 4자리(PDA 반납 인증번호 화면과 같은 API·번호). `GET /return-handovers?mfcId=` 30초마다, 반납이 끝나면 목록에서 빠진다.

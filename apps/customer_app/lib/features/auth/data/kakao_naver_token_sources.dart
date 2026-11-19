@@ -1,6 +1,5 @@
 import 'package:flutter/services.dart' show PlatformException;
-import 'package:flutter_naver_login/flutter_naver_login.dart';
-import 'package:flutter_naver_login/interface/types/naver_login_status.dart';
+import 'package:flutter_appauth/flutter_appauth.dart';
 import 'package:kakao_flutter_sdk_user/kakao_flutter_sdk_user.dart';
 
 import '../domain/auth.dart';
@@ -45,31 +44,49 @@ final class KakaoSocialTokenSource implements SocialTokenSource {
       null;
 }
 
-/// 네이버 로그인(BR-65): 네이버 Android SDK 로 로그인해 **액세스 토큰**을 `providerToken` 으로 넘긴다
-/// (서버가 `GET https://openapi.naver.com/v1/nid/me` 로 확인 — 사용자 2026-11-19 Android 만·SDK 방식).
-/// Client ID·Secret 은 빌드 때 매니페스트로만 들어간다(.secrets). 토큰은 로그에 남기지 않는다.
+/// 네이버 Client ID(공개 값, 빌드 때 `.secrets` 에서 dart-define 으로). 비면 네이버 버튼은 설정 문제로 알린다.
+const naverClientId = String.fromEnvironment('NAVER_CLIENT_ID');
+
+/// 네이버 로그인 뒤 돌아오는 앱 주소 — 네이버 콘솔 Callback URL 과 build.gradle `appAuthRedirectScheme` 와 같아야 한다.
+const naverRedirectUrl = 'com.pmart.customer://oauth/naver';
+
+/// 네이버 OIDC 공개 설정(https://nid.naver.com/.well-known/openid-configuration, 2026-11-19 확인).
+const _naverOidc = AuthorizationServiceConfiguration(
+  authorizationEndpoint: 'https://nid.naver.com/oauth2/authorize',
+  tokenEndpoint: 'https://nid.naver.com/oauth2/token',
+);
+
+/// 네이버 로그인(BR-65, auth 0.4.0·ADR-0071): OpenID Connect 인가 코드 + PKCE(scope `openid`, client secret 없음 —
+/// 토큰 엔드포인트 인증 none)로 받은 **id_token** 을 `providerToken` 으로 넘긴다. 네이버 SDK 는 액세스 토큰만 줘서 쓰지 않는다.
+/// 토큰은 로그에 남기지 않는다.
 final class NaverSocialTokenSource implements SocialTokenSource {
-  const NaverSocialTokenSource();
+  const NaverSocialTokenSource({this.clientId = naverClientId});
+
+  static const _appAuth = FlutterAppAuth();
+  final String clientId;
 
   @override
   Future<SocialCredential?> obtain(SocialProvider provider) async {
     if (provider != SocialProvider.naver) throw const SocialProviderDown();
+    if (clientId.isEmpty) throw const SocialProviderMisconfigured();
     try {
-      final result = await FlutterNaverLogin.logIn();
-      switch (result.status) {
-        case NaverLoginStatus.loggedIn:
-          final token = result.accessToken?.accessToken;
-          if (token == null || token.isEmpty) throw const SocialProviderDown();
-          return SocialCredential(token, accountLabel: result.account?.email);
-        case NaverLoginStatus.loggedOut:
-          return null; // 고객이 닫음
-        case NaverLoginStatus.error:
-          // SDK 는 취소도 오류 문구로 준다(문구 비교는 취소 판단에만 — 화면 문구로 쓰지 않는다).
-          final msg = result.errorMessage?.toLowerCase() ?? '';
-          if (msg.contains('cancel')) return null;
-          throw const SocialProviderDown();
+      final result = await _appAuth.authorizeAndExchangeCode(
+        AuthorizationTokenRequest(
+          clientId,
+          naverRedirectUrl,
+          scopes: const ['openid'],
+          serviceConfiguration: _naverOidc,
+        ),
+      );
+      final idToken = result.idToken;
+      if (idToken == null || idToken.isEmpty) {
+        throw const SocialProviderMisconfigured();
       }
+      return SocialCredential(idToken);
+    } on FlutterAppAuthUserCancelledException {
+      return null; // 고객이 로그인 화면을 닫음
     } on PlatformException {
+      // 콘솔에 Callback URL 이 없거나 네이버가 거절 — 상세는 화면에 쓰지 않는다.
       throw const SocialProviderDown();
     }
   }

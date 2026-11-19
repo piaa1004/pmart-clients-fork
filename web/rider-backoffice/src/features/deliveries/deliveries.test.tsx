@@ -32,6 +32,9 @@ describe('배송 찾기', () => {
     expect(await screen.findAllByTestId('delivery-row')).toHaveLength(2); // 원래 배송 + 반납 배송
     expect(searchCalls(view.sent).at(-1)!.get('orderId')).toBe('ORD-1');
 
+    // 찾으면 검색 조건이 칩 한 줄로 접힌다(2026-11-19 통합 백오피스처럼) — 칩에 건 조건, '검색 열기'로 다시 펼친다
+    expect(screen.getByRole('button', { name: '주문 한 주문 조건 바꾸기' })).toBeInTheDocument();
+    await userEvent.click(screen.getByTestId('search-toggle'));
     await userEvent.click(within(screen.getByRole('radiogroup', { name: '수행 상태' })).getByRole('radio', { name: '전달 완료' }));
     expect(await screen.findByText('조건에 맞는 배송이 없어요.')).toBeInTheDocument();
     const q = searchCalls(view.sent).at(-1)!;

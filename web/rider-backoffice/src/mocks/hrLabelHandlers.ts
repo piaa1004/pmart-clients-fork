@@ -1,4 +1,4 @@
-// 사본: web/backoffice/src/mocks/hrLabelHandlers.ts — hr 0.8.0 `GET /hr/employee-labels` 목(ADR-0070 덧붙임 — 직원 표시 "이름 · 사번").
+// 사본: web/backoffice/src/mocks/hrLabelHandlers.ts (main ed3e74c) — hr 0.8.0 `GET /hr/employee-labels` 목(ADR-0070 덧붙임 — 직원 표시 "이름 · 사번").
 // 아는 ID 만 돌려준다(모르는 ID 는 빠짐 → 화면은 "직원 …끝 6자리" 그대로). 이름은 목 표시([목])를 붙인다.
 import { http, HttpResponse } from 'msw';
 

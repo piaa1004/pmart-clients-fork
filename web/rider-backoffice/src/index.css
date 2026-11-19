@@ -28,7 +28,7 @@
   --radius-selector: 1rem;
 }
 
-/* 아래는 사본: web/backoffice/src/index.css (main 3222d26 무렵 — 어두운 테마·목록 한 카드·불러오는 뼈대·표 머리 고정·진행 단계 숨쉬기·움직임 효과) — 이 앱에서 따로 고친다. web-ui 로 옮겨질 예정.
+/* 아래는 사본: web/backoffice/src/index.css (main 06afd68 — 어두운 테마·목록 한 카드·불러오는 뼈대·표 머리 고정·진행 단계 숨쉬기·움직임 효과) — 이 앱에서 따로 고친다. web-ui 로 옮겨질 예정.
    다른 점: 이 앱 머리줄은 화면 위에 붙어 있어(sticky, 3.5rem) 표 머리·상세 제목 띠는 그 아래에 붙인다. */
 
 /* 어두운 테마(2026-11-18 사용자 "UI 보충 — 추천 다" — 야간 관제). 머리줄 단추로 고르고 이 브라우저에 기억(shared/theme.ts).
@@ -207,4 +207,70 @@ main [data-state='loading']::after {
 }
 @media (prefers-reduced-motion: reduce) {
   .flow-bar::after { animation: none; width: 100%; opacity: 0.4; }
+}
+
+/* 쿠팡 윙 본문 겉모습 — 사본: web/backoffice/src/index.css (main 06afd68) 의 data-skin=wing 덩어리. App.tsx 의 <main data-skin="wing"> 에만(왼쪽 메뉴·머리줄·어두운 화면은 그대로). */
+/* ---- 쿠팡 윙 느낌(2026-11-19 사용자 "왼쪽 메뉴는 안 건드리고 나머지 전체 적용") — 본문(main[data-skin=wing])만, 왼쪽 메뉴·머리줄은 그대로 ----
+   바탕은 연회색(전처럼) · 선명한 파랑 강조 하나 · 그림자 없이 얇은 회색 테두리 · 모서리 덜 둥글게 · 제목·표 글자 조금 크게 · 검색 띠만 연회색.
+   어두운 화면에는 적용하지 않는다(어두운 화면은 그대로). */
+/* 바탕은 전처럼 연회색(2026-11-19 사용자 "배경 전처럼 회색") — 흰 바탕 규칙 뺌, 상자·카드는 흰색 그대로 */
+:root:not([data-theme='pmart-dark']) [data-skin='wing'] {
+  --color-primary: #346aff;
+  --color-primary-content: #fff;
+  --color-info: #346aff;
+  --color-base-200: #f5f6f8;
+  --color-base-300: #e3e6ea;
+  --radius-box: 0.375rem;
+  --radius-field: 0.25rem;
+  --radius-selector: 0.25rem;
+  font-size: 14px;
+}
+:root:not([data-theme='pmart-dark']) [data-skin='wing'] :is(.shadow-sm, .shadow, .shadow-md, .shadow-lg) {
+  box-shadow: none;
+}
+:root:not([data-theme='pmart-dark']) [data-skin='wing'] h1 {
+  font-size: 1.5rem;
+  font-weight: 700;
+}
+:root:not([data-theme='pmart-dark']) [data-skin='wing'] header > div > div > span.rounded-xl {
+  display: none; /* 제목 옆 아이콘 타일 — 쿠팡 윙은 제목만 */
+}
+:root:not([data-theme='pmart-dark']) [data-skin='wing'] table :is(th) {
+  background: #f5f6f8;
+  font-size: 0.8125rem;
+  color: #555;
+}
+:root:not([data-theme='pmart-dark']) [data-skin='wing'] table td {
+  font-size: 0.875rem;
+  padding-block: 1rem;
+}
+:root:not([data-theme='pmart-dark']) [data-skin='wing'] .btn:not(.btn-primary):not(.btn-ghost) {
+  background: #fff;
+  border-color: #c9ced6;
+  box-shadow: none;
+  font-weight: 500;
+}
+:root:not([data-theme='pmart-dark']) [data-skin='wing'] [aria-current='true'].rounded-box {
+  border-color: #346aff;
+  background: #f0f5ff;
+  --tw-ring-color: transparent;
+}
+:root:not([data-theme='pmart-dark']) [data-skin='wing'] [role='group'] > .rounded-box > .absolute.inset-y-0.left-0.w-1 {
+  display: none; /* 숫자 카드 왼쪽 색 띠 — 쿠팡 윙은 숫자 색으로만 */
+}
+:root:not([data-theme='pmart-dark']) [data-skin='wing'] .text-xs {
+  font-size: 0.78rem;
+}
+:root:not([data-theme='pmart-dark']) [data-skin='wing'] [role='group'] > .rounded-box.min-h-20 {
+  padding-block: 1.25rem;
+}
+:root:not([data-theme='pmart-dark']) [data-skin='wing'] [role='group'] > .rounded-box.min-h-20 .text-3xl {
+  font-size: 2rem;
+}
+/* 고른 칩 — 검정 채움 대신 파란 테두리·파란 글자(쿠팡 윙 "쿠팡 전체 판매량순" 칩처럼) */
+:root:not([data-theme='pmart-dark']) [data-skin='wing'] [role='radiogroup'] .btn-neutral {
+  background: #f0f5ff;
+  border-color: #346aff;
+  color: #346aff;
+  font-weight: 600;
 }

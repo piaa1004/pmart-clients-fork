@@ -12,9 +12,10 @@ import { commandParams } from '../../api/command';
 import { useApi } from '../../app/ApiContext';
 import { useSession } from '../../app/SessionContext';
 import { photoMessages } from '../../shared/AuthedPhotos';
-import { DataTable, DetailHeader, FieldList, PageHeader, ResultBar, Section, SectionTabs, StatCard, StatStrip, StatusBadge } from '../../shared/admin';
+import { AllDone, DataTable, DetailHeader, GuideBox, FieldList, PageHeader, ResultBar, Section, SectionTabs, StatCard, StatStrip, StatusBadge } from '../../shared/admin';
 import { listCountText, statText, useListRows } from '../../shared/listKit';
 import { useNewIds } from '../../shared/motion';
+import { ui } from '../../shared/uiMessages';
 import { DeliveryNo, DeliveryRef, RiderName, RiderRef, StaffName, SystemIds, useDeliveryNumbers, useRiderSummaries } from '../../shared/displayNumbers';
 import { messages } from '../../shared/messages';
 import { ops } from '../../shared/opsMessages';
@@ -442,6 +443,8 @@ function WaitBadge({ from, now }: { readonly from: string | null | undefined; re
 const consultText = {
   title: '상담함',
   intro: '라이더가 보낸 배송 도움요청(급함)과 일반 문의를 한곳에서 봐요. 배송 도움요청이 먼저, 그 안에서는 오래 기다린 것부터. 누르면 대화를 열고, 끝나면 "상담 완료".',
+  // 안내 상자 글머리(2026-11-19) — 위 intro 를 문장으로 나눈 것(새 규칙 아님)
+  guide: ['라이더가 보낸 배송 도움요청(급함)과 일반 문의를 한곳에서 봐요.', '배송 도움요청이 먼저, 그 안에서는 오래 기다린 것부터.', '누르면 대화를 열고, 끝나면 "상담 완료".'],
   tabs: { open: '상담 중', done: '끝남' },
   kind: { help: '배송 도움요청', inquiry: '일반 문의', failure: '전달 실패 결정 대기' },
   failureTitle: '전달 불가 신고 — 확정·반려 기다림',
@@ -592,11 +595,12 @@ function ConsultsPage() {
   };
   return (
     <section className="space-y-4">
-      <PageHeader title={consultText.title} description={consultText.intro} />
+      <PageHeader title={consultText.title} />
+      <GuideBox title={ui.guideTitle} items={consultText.guide} storeKey="consults" testId="consults-guide" />
       <StatStrip label={consultText.stripLabel} testId="consult-strip">
-        <StatCard label={consultText.kind.help} value={statText(stats.data?.openHelpRequests, stats.isError)} hint={consultText.stripHelpHint} tone={(stats.data?.openHelpRequests ?? 0) > 0 ? 'warning' : undefined} testId="strip-help" />
-        <StatCard label={consultText.kind.failure} value={statText(stats.data?.inProgress?.['FAILURE_REPORTED'], stats.isError)} tone={(stats.data?.inProgress?.['FAILURE_REPORTED'] ?? 0) > 0 ? 'error' : undefined} testId="strip-failure" />
-        <StatCard label={consultText.kind.inquiry} value={listCountText(openInquiries.data, openInquiries.isError)} hint={consultText.stripInquiryHint} testId="strip-inquiry" />
+        <StatCard layout="row" label={consultText.kind.help} value={statText(stats.data?.openHelpRequests, stats.isError)} hint={consultText.stripHelpHint} tone={(stats.data?.openHelpRequests ?? 0) > 0 ? 'warning' : undefined} testId="strip-help" />
+        <StatCard layout="row" label={consultText.kind.failure} value={statText(stats.data?.inProgress?.['FAILURE_REPORTED'], stats.isError)} tone={(stats.data?.inProgress?.['FAILURE_REPORTED'] ?? 0) > 0 ? 'error' : undefined} testId="strip-failure" />
+        <StatCard layout="row" label={consultText.kind.inquiry} value={listCountText(openInquiries.data, openInquiries.isError)} hint={consultText.stripInquiryHint} testId="strip-inquiry" />
       </StatStrip>
       <StateTabs
         label={consultText.title}
@@ -624,6 +628,9 @@ function ConsultsPage() {
         </p>
       ) : loading ? (
         <span className="loading loading-spinner" aria-label="불러오는 중" />
+      ) : rows.length === 0 && tab === 'open' && help.isSuccess && inquiries.isSuccess && failures.isSuccess ? (
+        // 상담할 건이 서버 0건(세 원천 모두 읽음)일 때만 "수고하셨어요"(2026-11-19 통합 백오피스 AllDone) — 하나라도 못 읽으면 위 경고
+        <AllDone title={ui.allDone} body={consultText.empty.open} testId="consults-all-done" />
       ) : rows.length === 0 ? (
         <p className="rounded-box bg-base-100 px-4 py-10 text-center text-sm text-base-content/60">{consultText.empty[tab]}</p>
       ) : (

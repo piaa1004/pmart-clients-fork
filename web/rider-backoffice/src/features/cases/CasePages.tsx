@@ -14,7 +14,8 @@ import { useApi } from '../../app/ApiContext';
 import { messages } from '../../shared/messages';
 import { DeliveryRef, RiderRef, StaffName, SystemIds, useDeliveryNumbers, useRiderSummaries } from '../../shared/displayNumbers';
 import { useSession } from '../../app/SessionContext';
-import { ChipGroup, CursorPager, DataTable, DetailHeader, FieldList, Notice, PageHeader, ResultBar, SearchPanel, SearchRow, Section, StatCard, StatStrip, StatusBadge } from '../../shared/admin';
+import { AllDone, ChipGroup, GuideBox, CursorPager, DataTable, DetailHeader, FieldList, Notice, PageHeader, ResultBar, SearchPanel, SearchRow, Section, StatCard, StatStrip, StatusBadge } from '../../shared/admin';
+import { ui } from '../../shared/uiMessages';
 import { listCountText, useListRows } from '../../shared/listKit';
 import { SavedViews } from '../../shared/SavedViews';
 import { useNow } from '../../shared/useNow';
@@ -163,10 +164,11 @@ function CaseListPage() {
 
   return (
     <section className="space-y-4">
-      <PageHeader title={m.title} description={m.intro} actions={<SavedViews listKey="cases" />} />
+      <PageHeader title={m.title} actions={<SavedViews listKey="cases" />} />
+      <GuideBox title={ui.guideTitle} items={[m.intro]} storeKey="cases" testId="cases-guide" />
       <StatStrip label={cx.stripLabel} testId="case-strip">
-        <StatCard label={cx.unassigned} value={listCountText(unassignedCount.data, unassignedCount.isError)} hint={cx.listHint} to="/cases?unassigned=true" active={!closed && unassigned && !overdue} tone={(unassignedCount.data?.n ?? 0) > 0 ? 'warning' : undefined} testId="strip-unassigned" />
-        <StatCard label={cx.overdue} value={listCountText(overdueCount.data, overdueCount.isError)} hint={cx.listHint} to="/cases?overdue=true" active={!closed && overdue && !unassigned} tone={(overdueCount.data?.n ?? 0) > 0 ? 'error' : undefined} testId="strip-overdue" />
+        <StatCard layout="row" label={cx.unassigned} value={listCountText(unassignedCount.data, unassignedCount.isError)} hint={cx.listHint} to="/cases?unassigned=true" active={!closed && unassigned && !overdue} tone={(unassignedCount.data?.n ?? 0) > 0 ? 'warning' : undefined} testId="strip-unassigned" />
+        <StatCard layout="row" label={cx.overdue} value={listCountText(overdueCount.data, overdueCount.isError)} hint={cx.listHint} to="/cases?overdue=true" active={!closed && overdue && !unassigned} tone={(overdueCount.data?.n ?? 0) > 0 ? 'error' : undefined} testId="strip-overdue" />
       </StatStrip>
       <StateTabs
         label="처리 상태"
@@ -177,7 +179,14 @@ function CaseListPage() {
         ]}
         onChange={(v) => set({ state: v === 'CLOSED' ? 'CLOSED' : '' })}
       />
-      <SearchPanel onSubmit={submit} onReset={reset}>
+      <SearchPanel
+        onSubmit={submit}
+        onReset={reset}
+        summary={[
+          [m.kind, kind ? name(n.caseKind, kind) : ''],
+          ['조건', [overdue ? m.overdueOnly : '', unassigned ? m.unassignedOnly : ''].filter(Boolean).join(' · ')],
+        ]}
+      >
         <SearchRow label={m.kind}>
           <ChipGroup label={m.kind} value={kind ?? ''} options={[{ value: '', label: m.allKinds }, ...DELIVERY_KINDS.map((k) => ({ value: k, label: name(n.caseKind, k) }))]} onChange={(v) => set({ kind: v })} />
         </SearchRow>
@@ -194,57 +203,62 @@ function CaseListPage() {
           </SearchRow>
         )}
       </SearchPanel>
-      <QueryState state={toUiState(query, (r) => (r.items ?? []).length === 0)} onRetry={() => void query.refetch()} emptyText={closed ? m.emptyClosed : m.emptyOpen}>
-        {(r) => {
-          const nextCursor = r.page?.nextCursor ?? null;
-          const items = r.items ?? [];
-          return (
-            <div className="space-y-3">
-              <ResultBar count={items.length} more={!!nextCursor} />
-              <DataTable>
-                <thead>
-                  <tr>
-                    <th className="w-16">{m.col.priority}</th>
-                    <th>{m.col.kind}</th>
-                    <th>{m.col.summary}</th>
-                    <th>{m.col.refs}</th>
-                    <th>{m.col.sla}</th>
-                    <th>{m.col.state}</th>
-                    <th>{m.col.assignee}</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {items.map((c, i) => (
-                    <tr key={c.caseId ?? `case-${i}`} data-testid="case-row" className={`cursor-pointer ${c.overdue ? 'bg-error/5' : ''} ${listRows.rowClass(casePath(c.caseId))}`} onClick={() => open(c.caseId)}>
-                      <td>
-                        <PriorityBadge priority={c.priority} />
-                      </td>
-                      <td className="whitespace-nowrap">{name(n.caseKind, c.kind)}</td>
-                      <td className="font-medium">
-                        <Link className="hover:underline" to={`/cases/${encodeURIComponent(c.caseId ?? '')}`} onClick={(e) => e.stopPropagation()}>
-                          {c.summary || name(n.caseKind, c.kind)}
-                        </Link>
-                        {listRows.seenMark(casePath(c.caseId))}
-                      </td>
-                      <td>
-                        <Refs refs={c.refs} />
-                      </td>
-                      <td>
-                        <Sla slaDueAt={c.slaDueAt} overdue={c.overdue} now={c.state === 'CLOSED' ? null : now} />
-                      </td>
-                      <td>
-                        <StatusBadge tone={caseTone(c.state)}>{name(n.caseState, c.state)}</StatusBadge>
-                      </td>
-                      <td>{c.assigneeId ? <StaffName operatorId={c.assigneeId} me={me} /> : <span className="text-base-content/45">{m.unassigned}</span>}</td>
+      {/* 할 일이 서버 0건이면 "수고하셨어요"(2026-11-19 통합 백오피스 AllDone) — 읽는 중·실패·거르기를 건 때는 그리지 않는다 */}
+      {query.isSuccess && (query.data.items ?? []).length === 0 && !closed && !kind && !overdue && !unassigned && !cursor ? (
+        <AllDone title={ui.allDone} body={m.emptyOpen} testId="cases-all-done" />
+      ) : (
+        <QueryState state={toUiState(query, (r) => (r.items ?? []).length === 0)} onRetry={() => void query.refetch()} emptyText={closed ? m.emptyClosed : m.emptyOpen}>
+          {(r) => {
+            const nextCursor = r.page?.nextCursor ?? null;
+            const items = r.items ?? [];
+            return (
+              <div className="space-y-3">
+                <ResultBar count={items.length} more={!!nextCursor} />
+                <DataTable>
+                  <thead>
+                    <tr>
+                      <th className="w-16">{m.col.priority}</th>
+                      <th>{m.col.kind}</th>
+                      <th>{m.col.summary}</th>
+                      <th>{m.col.refs}</th>
+                      <th>{m.col.sla}</th>
+                      <th>{m.col.state}</th>
+                      <th>{m.col.assignee}</th>
                     </tr>
-                  ))}
-                </tbody>
-              </DataTable>
-              <CursorPager hasPrev={!!cursor} nextCursor={nextCursor} onFirst={() => set({})} onNext={(c) => set({ cursor: c })} />
-            </div>
-          );
-        }}
-      </QueryState>
+                  </thead>
+                  <tbody>
+                    {items.map((c, i) => (
+                      <tr key={c.caseId ?? `case-${i}`} data-testid="case-row" className={`cursor-pointer ${c.overdue ? 'bg-error/5' : ''} ${listRows.rowClass(casePath(c.caseId))}`} onClick={() => open(c.caseId)}>
+                        <td>
+                          <PriorityBadge priority={c.priority} />
+                        </td>
+                        <td className="whitespace-nowrap">{name(n.caseKind, c.kind)}</td>
+                        <td className="font-medium">
+                          <Link className="hover:underline" to={`/cases/${encodeURIComponent(c.caseId ?? '')}`} onClick={(e) => e.stopPropagation()}>
+                            {c.summary || name(n.caseKind, c.kind)}
+                          </Link>
+                          {listRows.seenMark(casePath(c.caseId))}
+                        </td>
+                        <td>
+                          <Refs refs={c.refs} />
+                        </td>
+                        <td>
+                          <Sla slaDueAt={c.slaDueAt} overdue={c.overdue} now={c.state === 'CLOSED' ? null : now} />
+                        </td>
+                        <td>
+                          <StatusBadge tone={caseTone(c.state)}>{name(n.caseState, c.state)}</StatusBadge>
+                        </td>
+                        <td>{c.assigneeId ? <StaffName operatorId={c.assigneeId} me={me} /> : <span className="text-base-content/45">{m.unassigned}</span>}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </DataTable>
+                <CursorPager hasPrev={!!cursor} nextCursor={nextCursor} onFirst={() => set({})} onNext={(c) => set({ cursor: c })} />
+              </div>
+            );
+          }}
+        </QueryState>
+      )}
     </section>
   );
 }

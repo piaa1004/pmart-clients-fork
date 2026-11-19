@@ -43,4 +43,8 @@ export const ui = {
   /** 상담함 기다린 시간 — 기한 임박 숨쉬기 */
   waitMinutes: (m: number) => `${m}분째`,
   newMessage: '새 메시지',
+  /** 할 일 0건 띠(AllDone) 제목 — 본문은 화면의 빈 안내 그대로 */
+  allDone: '수고하셨어요!',
+  /** 안내 상자(GuideBox) 제목 — 글머리는 화면에 원래 있던 설명 문장 */
+  guideTitle: '화면 안내',
 } as const;

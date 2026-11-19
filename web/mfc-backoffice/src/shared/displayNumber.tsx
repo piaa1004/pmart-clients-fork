@@ -21,8 +21,8 @@ function Fallback({ note, kind }: { readonly note: string; readonly kind: string
   );
 }
 
-/** 주문·배송 화면 번호 한 칸 */
-export function DisplayNumber({ number, systemId }: { readonly number?: string | null | undefined; readonly systemId?: string | null | undefined }) {
+/** 주문·배송 화면 번호 한 칸. 번호를 읽는 원천이 실패했으면(failed) "번호 확인 불가" — 없는 것과 못 읽은 것을 섞지 않는다 */
+export function DisplayNumber({ number, systemId, failed = false }: { readonly number?: string | null | undefined; readonly systemId?: string | null | undefined; readonly failed?: boolean }) {
   if (number)
     return (
       <span className="font-mono" data-testid="display-number">
@@ -30,7 +30,7 @@ export function DisplayNumber({ number, systemId }: { readonly number?: string |
       </span>
     );
   if (!systemId) return <span>{messages.none}</span>;
-  return <Fallback note={m.missing} kind="missing" />;
+  return failed ? <Fallback note={m.failed} kind="failed" /> : <Fallback note={m.missing} kind="missing" />;
 }
 
 /** 라이더 한 칸 — "김*수 · 482913". 번호가 없으면 "라이더 정보 비공개". 라이더가 없으면 부르는 쪽이 정한다. */

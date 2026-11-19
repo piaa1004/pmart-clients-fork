@@ -1,4 +1,4 @@
-// 사본: web/backoffice/src/shared/SavedViews.tsx (8b6ba49) — 이 앱에서 따로 고친다.
+// 사본: web/backoffice/src/shared/SavedViews.tsx (main 8b6ba49) — 이 앱에서 따로 고친다.
 // 목록 "내 보기"(2026-11-18 사용자 "참고 사이트 조합" — Saleor 대시보드의 저장된 필터 참고).
 // 목록 필터는 이미 주소(URL 쿼리)에 있으니, 지금 주소의 조건에 이름을 붙여 저장하고 한 번에 다시 연다.
 // 저장은 이 브라우저에만(localStorage — 보는 사람 한 명의 편의, 서버·다른 사람과 나누지 않음). 못 쓰는 환경이면 조용히 빈 목록.

@@ -7,6 +7,7 @@ import type { paths as ApprovalPaths } from './generated/approval';
 import type { paths as BffPaths } from './generated/backoffice-bff';
 import type { paths as CasePaths } from './generated/case';
 import type { paths as CenterPaths } from './generated/center-master';
+import type { paths as DispatchPaths } from './generated/delivery-dispatch';
 import type { paths as ExecutionPaths } from './generated/delivery-execution';
 import type { paths as HrPaths } from './generated/hr';
 import type { paths as CapacityPaths } from './generated/mfc-capacity';
@@ -44,6 +45,8 @@ export function createApi(pmartFetch: PmartFetch, baseUrl = API_BASE) {
     hr: createClient<HrPaths>(options),
     // 반납 인증번호(delivery-execution 0.28.0) — 회수·반납 배송이 MFC 로 올 때 라이더에게 알려 줄 4자리
     execution: createClient<ExecutionPaths>(options),
+    // 배차 지연 목록(delivery-dispatch 0.12.0)
+    dispatch: createClient<DispatchPaths>(options),
   };
 }
 
