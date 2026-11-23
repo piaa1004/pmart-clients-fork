@@ -1721,109 +1721,122 @@ class _DoneOverlay extends ConsumerWidget {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  SizedBox(
-                    height: 250,
-                    child: Stack(
-                      clipBehavior: Clip.none,
-                      children: [
-                        // 보라 판 — 위는 조금 밝고 아래로 진해지는 빛
-                        const Positioned.fill(
-                          child: DecoratedBox(
-                            decoration: BoxDecoration(
-                              gradient: LinearGradient(
-                                begin: Alignment.topLeft,
-                                end: Alignment.bottomRight,
-                                colors: [
-                                  Color(0xFF9B6BFF),
-                                  RiderColors.primary,
-                                  Color(0xFF5A2BD8),
+                  // 배달완료: 사용자가 만든 캐릭터 그림(보라 판 · "배달완료" · 엄지 든 라이더, assets/images/done_banner.png —
+                  // 2026-11-23 사용자가 보낸 화면에서 잘라 넣음). 반납은 글자가 달라 그린 판("반납완료")을 쓴다.
+                  if (label == null)
+                    Image.asset(
+                      'assets/images/done_banner.png',
+                      key: const ValueKey('done-banner'),
+                      width: double.infinity,
+                      fit: BoxFit.fitWidth,
+                      filterQuality: FilterQuality.high,
+                    )
+                  else ...[
+                    SizedBox(
+                      height: 250,
+                      child: Stack(
+                        clipBehavior: Clip.none,
+                        children: [
+                          // 보라 판 — 위는 조금 밝고 아래로 진해지는 빛
+                          const Positioned.fill(
+                            child: DecoratedBox(
+                              decoration: BoxDecoration(
+                                gradient: LinearGradient(
+                                  begin: Alignment.topLeft,
+                                  end: Alignment.bottomRight,
+                                  colors: [
+                                    Color(0xFF9B6BFF),
+                                    RiderColors.primary,
+                                    Color(0xFF5A2BD8),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                          // 은은한 빛 방울(레퍼런스 왼쪽 위 빛 번짐)
+                          const _Glow(
+                            left: -30,
+                            top: -40,
+                            size: 150,
+                            alpha: 0.28,
+                          ),
+                          const _Glow(left: 70, top: 30, size: 70, alpha: 0.22),
+                          const _Glow(
+                            left: 170,
+                            top: -20,
+                            size: 110,
+                            alpha: 0.12,
+                          ),
+                          Positioned(
+                            left: 0,
+                            right: 0,
+                            top: 56,
+                            child: Text(
+                              label ?? l10n.doneBanner,
+                              textAlign: TextAlign.center,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 58,
+                                height: 1,
+                                fontWeight: FontWeight.w900,
+                                letterSpacing: -1,
+                                shadows: [
+                                  Shadow(
+                                    color: Color(0x33000000),
+                                    blurRadius: 12,
+                                    offset: Offset(0, 4),
+                                  ),
                                 ],
                               ),
                             ),
                           ),
-                        ),
-                        // 은은한 빛 방울(레퍼런스 왼쪽 위 빛 번짐)
-                        const _Glow(
-                          left: -30,
-                          top: -40,
-                          size: 150,
-                          alpha: 0.28,
-                        ),
-                        const _Glow(left: 70, top: 30, size: 70, alpha: 0.22),
-                        const _Glow(
-                          left: 170,
-                          top: -20,
-                          size: 110,
-                          alpha: 0.12,
-                        ),
-                        Positioned(
-                          left: 0,
-                          right: 0,
-                          top: 56,
-                          child: Text(
-                            label ?? l10n.doneBanner,
-                            textAlign: TextAlign.center,
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 58,
-                              height: 1,
-                              fontWeight: FontWeight.w900,
-                              letterSpacing: -1,
-                              shadows: [
-                                Shadow(
-                                  color: Color(0x33000000),
-                                  blurRadius: 12,
-                                  offset: Offset(0, 4),
+                          // 캐릭터 자리 — 판 아래 흰 칸에 걸친다
+                          Positioned(
+                            left: 0,
+                            right: 0,
+                            bottom: -34,
+                            child: Center(
+                              child: TweenAnimationBuilder<double>(
+                                tween: Tween(begin: 0, end: 1),
+                                duration: const Duration(milliseconds: 620),
+                                curve: Curves.elasticOut,
+                                builder: (context, v, child) => Transform.scale(
+                                  scale: 0.6 + 0.4 * v,
+                                  child: child,
                                 ),
-                              ],
-                            ),
-                          ),
-                        ),
-                        // 캐릭터 자리 — 판 아래 흰 칸에 걸친다
-                        Positioned(
-                          left: 0,
-                          right: 0,
-                          bottom: -34,
-                          child: Center(
-                            child: TweenAnimationBuilder<double>(
-                              tween: Tween(begin: 0, end: 1),
-                              duration: const Duration(milliseconds: 620),
-                              curve: Curves.elasticOut,
-                              builder: (context, v, child) => Transform.scale(
-                                scale: 0.6 + 0.4 * v,
-                                child: child,
-                              ),
-                              child: Container(
-                                width: 108,
-                                height: 108,
-                                decoration: BoxDecoration(
-                                  color: Colors.white,
-                                  shape: BoxShape.circle,
-                                  border: Border.all(
-                                    color: const Color(0xFFEDE6FF),
-                                    width: 4,
-                                  ),
-                                  boxShadow: const [
-                                    BoxShadow(
-                                      color: Color(0x33000000),
-                                      blurRadius: 14,
-                                      offset: Offset(0, 4),
+                                child: Container(
+                                  width: 108,
+                                  height: 108,
+                                  decoration: BoxDecoration(
+                                    color: Colors.white,
+                                    shape: BoxShape.circle,
+                                    border: Border.all(
+                                      color: const Color(0xFFEDE6FF),
+                                      width: 4,
                                     ),
-                                  ],
-                                ),
-                                child: const Icon(
-                                  Icons.delivery_dining_rounded,
-                                  size: 64,
-                                  color: RiderColors.primary,
+                                    boxShadow: const [
+                                      BoxShadow(
+                                        color: Color(0x33000000),
+                                        blurRadius: 14,
+                                        offset: Offset(0, 4),
+                                      ),
+                                    ],
+                                  ),
+                                  child: const Icon(
+                                    Icons.delivery_dining_rounded,
+                                    size: 64,
+                                    color: RiderColors.primary,
+                                  ),
                                 ),
                               ),
                             ),
                           ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 48),
+                    const SizedBox(height: 48),
+                  ],
+                  const SizedBox(height: 18),
                   if (fee != null)
                     Text(
                       l10n.doneFee(formatKrw(fee)),

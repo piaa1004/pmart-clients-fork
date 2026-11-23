@@ -71,6 +71,8 @@ flutter:
     - assets/terms/
     # 시작 화면 그림(사용자 2026-11-19).
     - assets/splash/
+    # 배달완료 카드 그림(사용자가 만든 캐릭터, 2026-11-23).
+    - assets/images/
   # Pretendard (SIL OFL 1.1, assets/fonts/Pretendard-LICENSE.txt) — 고객앱과 같은 글꼴(사용자 2026-11-20 "폰트도 구리고").
   fonts:
     - family: Pretendard
