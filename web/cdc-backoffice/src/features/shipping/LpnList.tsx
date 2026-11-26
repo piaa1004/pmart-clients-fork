@@ -8,6 +8,7 @@ import { request } from '@pmart/web-core';
 import { formatSeoul, QueryState, toUiState } from '@pmart/web-ui';
 import { useApi } from '../../app/ApiContext';
 import { messages } from '../../shared/messages';
+import { shortRef } from '../../shared/shortRef';
 import { MfcName } from '../../shared/MfcName';
 import { findTrfId } from '../../shared/findByNumber';
 import { Who } from '../../shared/OperatorLabel';
@@ -121,7 +122,7 @@ export function LpnList({ cdcId }: { readonly cdcId: string }) {
                           <td>{l.units[x.unitType] ?? x.unitType}</td>
                           <td className="text-xs">
                             <Link className="link font-mono" to={trfWavePath(cdcId, `trf/${encodeURIComponent(x.trfId)}`)} onClick={(e) => e.stopPropagation()}>
-                              {x.trfId}
+                              {shortRef(x.trfId)}
                             </Link>
                             {x.mfcId && <MfcName id={x.mfcId} className="ml-1 text-base-content/60" />}
                           </td>

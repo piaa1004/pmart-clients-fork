@@ -188,6 +188,17 @@ function seed() {
       transfers: [{ trfId: 'TRF-20261125-0009', trfNumber: 'T553019', result: 'MATCHED', departedQty: 40, postingStatus: 'APPLIED', residualStatus: 'DONE' }],
       mismatches: [],
     },
+    // 시뮬레이터가 만든 출발(화면 번호 없음 — 실서버에서 본 모양, 2026-11-26)
+    {
+      departureId: 'DEP-c5b97d11-901e-4788-8bff-d5544a6b4f57',
+      tripId: 'TO-20261126-001',
+      vehicleId: 'VH-5T-04A',
+      source: 'SIMULATED',
+      validatedAt: at(5, 20),
+      overallResult: 'MATCHED',
+      transfers: [{ trfId: 'TRF-SIM-MWXA84EQ', result: 'MATCHED', departedQty: 6, postingStatus: 'APPLIED', residualStatus: 'DONE' }],
+      mismatches: [],
+    },
   ];
   return { transfers, waves, tasks, departures, seq: 2 };
 }

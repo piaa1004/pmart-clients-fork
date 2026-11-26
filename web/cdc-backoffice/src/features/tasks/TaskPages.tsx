@@ -13,6 +13,7 @@ import { useApi } from '../../app/ApiContext';
 import { centerPath } from '../../app/nav';
 import { findWaveId } from '../../shared/findByNumber';
 import { messages } from '../../shared/messages';
+import { shortRef } from '../../shared/shortRef';
 import { MfcName } from '../../shared/MfcName';
 import { Who } from '../../shared/OperatorLabel';
 import { SkuName } from '../../shared/SkuName';
@@ -46,7 +47,7 @@ export function TaskStateBadge({ state }: { readonly state: string | undefined }
 
 const sum = (t: Task, k: 'plannedQty' | 'pickedQty' | 'shortQty') => (t.lines ?? []).reduce((a, l) => a + (l[k] ?? 0), 0);
 const place = (t: Task) => [t.zone, t.floor ? `${t.floor}층` : null, t.aisle].filter(Boolean).join(' · ') || messages.none;
-const trfText = (t: Task) => ((t.trfIds?.length ?? 0) > 1 ? m.batch(t.trfIds!.length) : (t.trfNumber ?? t.trfNumbers?.[0] ?? t.trfId ?? t.trfIds?.[0] ?? messages.none));
+const trfText = (t: Task) => ((t.trfIds?.length ?? 0) > 1 ? m.batch(t.trfIds!.length) : (t.trfNumber ?? t.trfNumbers?.[0] ?? (shortRef(t.trfId ?? t.trfIds?.[0]) || messages.none)));
 
 /** 최근 Wave 200개(만든 시각 최신 순 — cdc-outbound 0.15.0) */
 function useRecentWaves(cdcId: string) {
@@ -324,7 +325,7 @@ function TaskDetailPage({ cdcId }: { readonly cdcId: string }) {
                           ? messages.none
                           : (l.shares ?? []).map((s) => (
                               <div key={s.trfId}>
-                                <MfcName id={s.mfcId} /> <span className="font-mono" title={s.trfId}>{s.trfNumber ?? s.trfId}</span>{` · ${messages.qty(s.pickedQty ?? 0)}/${messages.qty(s.plannedQty ?? 0)}`}
+                                <MfcName id={s.mfcId} /> <span className="font-mono" title={s.trfId}>{s.trfNumber ?? shortRef(s.trfId)}</span>{` · ${messages.qty(s.pickedQty ?? 0)}/${messages.qty(s.plannedQty ?? 0)}`}
                               </div>
                             ))}
                       </td>

@@ -14,6 +14,7 @@ import type { components } from '../../api/generated/cdc-outbound';
 import { useApi } from '../../app/ApiContext';
 import { centerPath } from '../../app/nav';
 import { messages } from '../../shared/messages';
+import { shortRef } from '../../shared/shortRef';
 import { MfcName } from '../../shared/MfcName';
 import { ResultBadge } from '../shipping/ShippingPage';
 import { trfWavePath } from '../trf-wave/TrfWavePages';
@@ -222,7 +223,7 @@ function RecentDepartures({ cdcId, trfs }: { readonly cdcId: string; readonly tr
                     <li key={`${dep.departureId}-${x.trfId}`} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2 text-sm" data-testid="flow-recent-row">
                       <span className="w-28 shrink-0 text-xs text-base-content/60">{dep.validatedAt ? formatSeoul(dep.validatedAt) : messages.none}</span>
                       <Link className="link font-mono text-xs" to={trfWavePath(cdcId, `trf/${encodeURIComponent(x.trfId ?? '')}`)}>
-                        {x.trfNumber ?? (trf ? trfLabel(trf) : x.trfId)}
+                        {x.trfNumber ?? (trf ? trfLabel(trf) : shortRef(x.trfId))}
                       </Link>
                       <span aria-hidden className="text-base-content/40">→</span>
                       <DepartureMfc cdcId={cdcId} trfId={x.trfId ?? ''} known={trf?.mfcId} />

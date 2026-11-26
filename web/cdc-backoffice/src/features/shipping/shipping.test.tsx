@@ -9,7 +9,7 @@ describe('출발 검증', () => {
   it('최신 순 목록 — 펼치면 TRF 별 결과·재고 반영·해제 실패 사유와 불일치', async () => {
     renderAt('/c/CDC01/shipping');
     const rows = await screen.findAllByTestId('departure-row');
-    expect(rows).toHaveLength(2);
+    expect(rows).toHaveLength(3);
     expect(within(rows[0]!).getByText('일부 일치')).toBeInTheDocument();
     await userEvent.click(rows[0]!);
     const detail = screen.getByTestId('departure-detail');
@@ -22,7 +22,7 @@ describe('출발 검증', () => {
     const view = renderAt('/c/CDC01/shipping');
     await screen.findAllByTestId('departure-row');
     await userEvent.selectOptions(screen.getByTestId('departure-result'), 'MATCHED');
-    await waitFor(() => expect(screen.getAllByTestId('departure-row')).toHaveLength(1));
+    await waitFor(() => expect(screen.getAllByTestId('departure-row')).toHaveLength(2));
     expect(view.gets('/departures').some((r) => new URL(r.url).searchParams.get('result') === 'MATCHED')).toBe(true);
   });
 });

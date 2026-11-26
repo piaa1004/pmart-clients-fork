@@ -11,6 +11,7 @@ import type { components } from '../../api/generated/cdc-outbound';
 import { useApi } from '../../app/ApiContext';
 import { messages } from '../../shared/messages';
 import { trfWavePath } from '../trf-wave/TrfWavePages';
+import { shortRef } from '../../shared/shortRef';
 import { LpnList } from './LpnList';
 
 const t = messages.shipping;
@@ -105,7 +106,7 @@ export function ShippingMenu({ cdcId }: { readonly cdcId: string }) {
                             <span aria-hidden className="mr-1 inline-block w-3 text-base-content/50">
                               {isOpen ? '▾' : '▸'}
                             </span>
-                            {d.departureNumber ?? k}
+                            {d.departureNumber ?? (d.tripId ? `${t.trip} ${d.tripId}` : shortRef(k))}
                           </td>
                           <td>{d.validatedAt ? formatSeoul(d.validatedAt) : messages.none}</td>
                           <td>
@@ -150,7 +151,11 @@ export function ShippingMenu({ cdcId }: { readonly cdcId: string }) {
 function DepartureDetail({ cdcId, d }: { readonly cdcId: string; readonly d: Departure }) {
   return (
     <div className="space-y-3 py-1" data-testid="departure-detail">
-      <p className="text-xs text-base-content/60">{[d.tripId ? `${t.trip} ${d.tripId}` : null, d.vehicleId ? `${t.vehicle} ${d.vehicleId}` : null].filter(Boolean).join(' · ') || messages.none}</p>
+      <p className="text-sm" data-testid="departure-story">
+        {t.story(d.vehicleId ?? messages.none, (d.transfers ?? []).length, d.validatedAt ? formatSeoul(d.validatedAt) : messages.none)}{' '}
+        {t.storyResult[d.overallResult ?? ''] ?? ''}
+      </p>
+      <p className="text-xs text-base-content/60">{t.columnsHelp}</p>
       <table className="table table-xs">
         <thead>
           <tr>
@@ -166,7 +171,7 @@ function DepartureDetail({ cdcId, d }: { readonly cdcId: string; readonly d: Dep
             <tr key={x.trfId}>
               <td>
                 <Link className="link font-mono" to={trfWavePath(cdcId, `trf/${encodeURIComponent(x.trfId ?? '')}`)} title={x.trfId}>
-                  {x.trfNumber ?? x.trfId}
+                  {x.trfNumber ?? shortRef(x.trfId)}
                 </Link>
               </td>
               <td>
@@ -199,7 +204,7 @@ function DepartureDetail({ cdcId, d }: { readonly cdcId: string; readonly d: Dep
               <tr key={`${x.kind}-${x.lpn}-${i}`}>
                 <td className="text-error">{x.kind ? (t.mismatchKind[x.kind] ?? x.kind) : messages.none}</td>
                 <td className="font-mono">{x.lpn ?? messages.none}</td>
-                <td className="font-mono">{x.trfId ?? messages.none}</td>
+                <td className="font-mono" title={x.trfId}>{x.trfId ? shortRef(x.trfId) : messages.none}</td>
                 <td className="whitespace-normal">{x.detail ?? messages.none}</td>
               </tr>
             ))}

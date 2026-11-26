@@ -53,3 +53,14 @@ describe('출발 번호·MFC 이름', () => {
     expect(screen.queryByText('DEP-0002')).not.toBeInTheDocument();
   });
 });
+
+describe('번호 없는 출발(시뮬레이터)', () => {
+  it('긴 출발 ID 대신 운행 번호, 펼치면 무슨 뜻인지 한 문장', async () => {
+    renderAt('/c/CDC01/shipping');
+    const row = (await screen.findAllByTestId('departure-row')).find((r) => r.textContent.includes('운행 TO-20261126-001'))!;
+    expect(row).not.toHaveTextContent('c5b97d11');
+    await userEvent.click(row);
+    expect(await screen.findByTestId('departure-story')).toHaveTextContent('차량 VH-5T-04A 가 TRF 1건을 싣고');
+    expect(screen.getByTestId('departure-story')).toHaveTextContent('모두 TRF 와 맞았어요');
+  });
+});

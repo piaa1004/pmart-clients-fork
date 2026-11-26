@@ -18,6 +18,7 @@ import { useApi } from '../../app/ApiContext';
 import { centerPath } from '../../app/nav';
 import { findWaveId } from '../../shared/findByNumber';
 import { messages } from '../../shared/messages';
+import { shortRef } from '../../shared/shortRef';
 import { MfcName, useMfcLabel } from '../../shared/MfcName';
 import { SkuName } from '../../shared/SkuName';
 import { WaveControls } from './WaveControls';
@@ -340,7 +341,7 @@ function TransferListPage({ cdcId }: { readonly cdcId: string }) {
                         </td>
                         <td>
                           <Link className="link font-mono text-xs" to={trfWavePath(cdcId, `trf/${encodeURIComponent(t.trfId)}`)}>
-                            {t.trfNumber ?? t.trfId}
+                            {t.trfNumber ?? shortRef(t.trfId)}
                           </Link>
                         </td>
                         <td className="text-xs">
@@ -439,7 +440,7 @@ function TransferDetailPage({ cdcId }: { readonly cdcId: string }) {
       <QueryState state={toUiState(query)} onRetry={() => void query.refetch()}>
         {(t) => (
           <>
-            <DetailHeader back={{ to: trfWavePath(cdcId), label: m.back }} title={t.trfNumber ?? t.trfId} badges={<TrfStateBadge state={t.state} />} summary={`${m.fields.mfc} ${mfcLabel(t.mfcId)} · ${m.fields.dueAt} ${formatSeoul(t.dueAt)}${t.trfNumber ? ` · ${w.systemId} ${t.trfId}` : ''}`} />
+            <DetailHeader back={{ to: trfWavePath(cdcId), label: m.back }} title={t.trfNumber ?? shortRef(t.trfId)} badges={<TrfStateBadge state={t.state} />} summary={`${m.fields.mfc} ${mfcLabel(t.mfcId)} · ${m.fields.dueAt} ${formatSeoul(t.dueAt)}${t.trfNumber ? ` · ${w.systemId} ${t.trfId}` : ''}`} />
             <div className="rounded-box border border-base-300 bg-base-100 p-4">
               <FieldList
                 testId="trf-fields"

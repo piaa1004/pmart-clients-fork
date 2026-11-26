@@ -16,6 +16,7 @@ import type { components } from '../../api/generated/transport-planning';
 import { useApi } from '../../app/ApiContext';
 import { centerPath } from '../../app/nav';
 import { messages } from '../../shared/messages';
+import { shortRef } from '../../shared/shortRef';
 import { MfcName } from '../../shared/MfcName';
 import { SkuName } from '../../shared/SkuName';
 import { trfWavePath } from '../trf-wave/TrfWavePages';
@@ -130,7 +131,7 @@ export function TransferRequestsView({ cdcId, date }: { readonly cdcId: string; 
                                 <span aria-hidden className="mr-1 inline-block w-3 text-base-content/50">
                                   {isOpen ? '▾' : '▸'}
                                 </span>
-                                {x.trfNumber ?? x.trfId}
+                                {x.trfNumber ?? shortRef(x.trfId)}
                                 <span className="ml-1 text-base-content/45">v{x.trfVersion}</span>
                               </td>
                               <td className="text-xs">

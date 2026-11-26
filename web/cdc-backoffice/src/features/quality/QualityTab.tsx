@@ -15,6 +15,7 @@ import type { components } from '../../api/generated/cdc-quality';
 import { useApi } from '../../app/ApiContext';
 import { centerPath } from '../../app/nav';
 import { messages } from '../../shared/messages';
+import { shortRef } from '../../shared/shortRef';
 import { Who } from '../../shared/OperatorLabel';
 import { SkuName } from '../../shared/SkuName';
 
@@ -936,7 +937,7 @@ function RecallDetail({ cdcId, recallId }: { readonly cdcId: string; readonly re
                   {(r.departures ?? []).map((x) => (
                     <tr key={`${x.departureId}-${x.lot}`}>
                       <td className="font-mono">{x.lot}</td>
-                      <td className="font-mono">{x.trfId}</td>
+                      <td className="font-mono" title={x.trfId}>{shortRef(x.trfId)}</td>
                       <td className="font-mono">{x.mfcId ?? messages.none}</td>
                       <td className="text-right tabular-nums">{messages.qty(x.q ?? 0)}</td>
                       <td className="text-right tabular-nums">{messages.qty(x.received ?? 0)}</td>

@@ -14,6 +14,7 @@ import { commandParams } from '../../api/command';
 import type { components } from '../../api/generated/transport-execution';
 import { useApi } from '../../app/ApiContext';
 import { messages } from '../../shared/messages';
+import { shortRef } from '../../shared/shortRef';
 import { MfcName, useMfcLabel } from '../../shared/MfcName';
 import { Who } from '../../shared/OperatorLabel';
 import { DockView } from './DockView';
@@ -265,7 +266,7 @@ function TripDetail({ cdcId, trip }: { readonly cdcId: string; readonly trip: Tr
           {trip.departedAt ? ` → ${fmt(trip.departedAt)}` : ''}
         </p>
         <p>
-          <span className="text-base-content/60">{t.outbound}</span> {trip.departureId ?? messages.none}
+          <span className="text-base-content/60">{t.outbound}</span> {trip.departureId ? shortRef(trip.departureId) : messages.none}
           {trip.outboundLinkage ? ` · ${t.linkage[trip.outboundLinkage] ?? trip.outboundLinkage}` : ''}
           {trip.outboundResult ? ` · ${messages.shipping.results[trip.outboundResult] ?? trip.outboundResult}` : ''}
         </p>
@@ -281,7 +282,7 @@ function TripDetail({ cdcId, trip }: { readonly cdcId: string; readonly trip: Tr
         <ul className="flex flex-wrap gap-2 text-xs">
           {(trip.transfers ?? []).map((x) => (
             <li key={x.trfId} className={`badge badge-sm ${x.loaded ? 'badge-success badge-outline' : 'badge-ghost'}`}>
-              {x.trfId} · {x.loaded ? t.lpnCount(x.lpns?.length ?? 0) : t.notLoaded}
+              {shortRef(x.trfId)} · {x.loaded ? t.lpnCount(x.lpns?.length ?? 0) : t.notLoaded}
             </li>
           ))}
         </ul>
@@ -369,7 +370,7 @@ function StopsTable({ cdcId, trip }: { readonly cdcId: string; readonly trip: Tr
                   <td>{t.stopSeq(seq)}</td>
                   <td className="font-mono text-xs">
                     <MfcName id={s.mfcId} />
-                    <span className="block text-base-content/55">{(s.trfIds ?? []).join(', ')}</span>
+                    <span className="block text-base-content/55">{(s.trfIds ?? []).map(shortRef).join(', ')}</span>
                   </td>
                   <td>
                     <span className="flex flex-wrap gap-1">

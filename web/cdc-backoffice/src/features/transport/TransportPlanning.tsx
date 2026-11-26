@@ -12,6 +12,7 @@ import { commandParams } from '../../api/command';
 import type { components } from '../../api/generated/transport-planning';
 import { useApi } from '../../app/ApiContext';
 import { messages } from '../../shared/messages';
+import { shortRef } from '../../shared/shortRef';
 import { MfcName } from '../../shared/MfcName';
 import { Who } from '../../shared/OperatorLabel';
 import { NewRouteForm, RegularVehicleForm } from './FleetPages';
@@ -203,7 +204,7 @@ function OrderDetail({ cdcId, order: o, all }: { readonly cdcId: string; readonl
                   <MfcName id={s.mfcId} />
                 </td>
                 <td>{fmt(s.plannedArrivalAt)}</td>
-                <td className="font-mono">{(s.trfIds ?? []).join(', ') || messages.none}</td>
+                <td className="font-mono">{(s.trfIds ?? []).map(shortRef).join(', ') || messages.none}</td>
                 <td className="text-right">
                   {s.boxCount ?? 0} · {s.rtCount ?? 0}
                 </td>
