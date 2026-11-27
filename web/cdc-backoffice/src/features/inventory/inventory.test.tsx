@@ -25,6 +25,19 @@ describe('재고 현황', () => {
   });
 });
 
+describe('실사 목록', () => {
+  it('최근 실사(서버 목록)를 누르면 그 실사, 화면 번호로도 연다', async () => {
+    const view = renderAt('/c/CDC01/inventory?tab=count');
+    const rows = await screen.findAllByTestId('count-recent-row');
+    expect(rows[0]).toHaveTextContent('C1001');
+    expect(rows[0]).toHaveTextContent('1칸');
+    await userEvent.type(screen.getByRole('textbox', { name: '실사 번호로 열기' }), '1001');
+    await userEvent.click(screen.getByRole('button', { name: '열기' }));
+    expect(await screen.findByTestId('count-steps')).toBeInTheDocument();
+    expect(view.gets('/cdcs/CDC01/count-sessions').some((r) => new URL(r.url).searchParams.get('number') === '1001')).toBe(true);
+  });
+});
+
 describe('재계수 대기', () => {
   it('[이 칸 실사] — 그 칸을 미리 고른 실사 시작으로', async () => {
     renderAt('/c/CDC01/inventory?tab=recount');

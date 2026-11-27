@@ -92,6 +92,7 @@ function seed() {
   const counts: Inv['schemas']['CountSession'][] = [
     {
       sessionId: 'CNT-0001',
+      sessionNumber: 'C1001',
       cdcId: 'CDC01',
       state: 'PENDING_APPROVAL',
       locationCodes: ['CDC01-B-6-67-01-1-1'],
@@ -316,8 +317,10 @@ export const stockHandlers = [
   http.get(`${API_BASE}/cdcs/:cdcId/count-sessions`, ({ request, params }) => {
     const denied = guard(request, String(params.cdcId));
     if (denied) return denied;
-    const state = new URL(request.url).searchParams.get('state');
-    const rows = store.counts.filter((x) => !state || x.state === state);
+    const sp = new URL(request.url).searchParams;
+    const state = sp.get('state');
+    const num = sp.get('number')?.replace(/^C/i, '');
+    const rows = store.counts.filter((x) => (!state || x.state === state) && (!num || x.sessionNumber?.replace(/^C/i, '') === num));
     return HttpResponse.json({ items: rows, page: 0, size: 50, hasNext: false });
   }),
   http.get(`${API_BASE}/cdcs/:cdcId/count-sessions/:sessionId`, ({ request, params }) => {

@@ -5,7 +5,7 @@
 // - 재계수 `POST …/recounts`(RECOUNT_REQUIRED, 첫 계수자와 다른 사람 — 같으면 409 SAME_COUNTER) → MATCHED 또는 PENDING_APPROVAL.
 // - 결정 `POST …/decisions`(PENDING_APPROVAL, 시작·계수자가 아닌 관리자 — 422 SELF_APPROVAL).
 // - 모든 줄에 수량을 넣어야 보낸다(빈 칸을 0 으로 치지 않는다). 현장 PDA 로 세도 된다 — 같은 실사.
-// - 실사 목록 조회는 계약에 없다(백엔드 CS-1 요청) — 시작하면 그 실사로 가고, 번호로 연다.
+// - 최근 실사 목록(0.12.0 CS-1 — 2026-11-27 백엔드 회신으로 붙임)·화면 번호로 열기(0.17.0 number).
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useMemo, useState, type FormEvent } from 'react';
 import { useSearchParams } from 'react-router';
@@ -51,7 +51,9 @@ function Steps({ state }: { readonly state: string | undefined }) {
 export function CountTab({ cdcId }: { readonly cdcId: string }) {
   const [params, setParams] = useSearchParams();
   const sessionId = params.get('session') ?? '';
+  const api = useApi();
   const [openId, setOpenId] = useState('');
+  const [miss, setMiss] = useState<string | null>(null);
   const go = (id: string) => {
     const q = new URLSearchParams(params);
     if (id) q.set('session', id);
@@ -69,27 +71,79 @@ export function CountTab({ cdcId }: { readonly cdcId: string }) {
           <CountSessionView cdcId={cdcId} sessionId={sessionId} />
         </>
       ) : (
-        <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_20rem]">
-          <StartForm cdcId={cdcId} onStarted={go} />
-          <form
-            className="h-fit space-y-3 rounded-box border border-base-300 bg-base-100 p-4"
-            onSubmit={(e) => {
-              e.preventDefault();
-              if (openId.trim()) go(openId.trim());
-            }}
-          >
-            <h2 className="text-base font-semibold">{c.openById}</h2>
-            <div className="flex gap-2">
-              <input className="input input-sm w-full" value={openId} placeholder={c.idPlaceholder} onChange={(e) => setOpenId(e.target.value)} aria-label={c.openById} />
-              <button type="submit" className="btn btn-sm" disabled={!openId.trim()}>
-                {c.open}
-              </button>
-            </div>
-            <p className="text-xs text-base-content/55">{c.listMissing}</p>
-          </form>
-        </div>
+        <>
+          <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_20rem]">
+            <StartForm cdcId={cdcId} onStarted={go} />
+            <form
+              className="h-fit space-y-3 rounded-box border border-base-300 bg-base-100 p-4"
+              onSubmit={(e) => {
+                e.preventDefault();
+                const v = openId.trim();
+                if (!v) return;
+                setMiss(null);
+                // 화면 번호(0.17.0 number)로 먼저 찾고, 못 찾으면 시스템 ID 로 연다
+                if (v.toUpperCase().startsWith('CNT-')) return go(v);
+                void request('GET', api.inventory.GET('/cdcs/{cdcId}/count-sessions', { params: { path: { cdcId }, query: { number: v, size: 1 } } })).then(
+                  (d) => (d.items[0]?.sessionId ? go(d.items[0].sessionId) : setMiss(v)),
+                  () => setMiss(v),
+                );
+              }}
+            >
+              <h2 className="text-base font-semibold">{c.openById}</h2>
+              <div className="flex gap-2">
+                <input className="input input-sm w-full" value={openId} placeholder={c.idPlaceholder} onChange={(e) => setOpenId(e.target.value)} aria-label={c.openById} />
+                <button type="submit" className="btn btn-sm" disabled={!openId.trim()}>
+                  {c.open}
+                </button>
+              </div>
+              {miss && <p className="text-xs text-error">{c.notFound(miss)}</p>}
+            </form>
+          </div>
+          <RecentCounts cdcId={cdcId} onOpen={go} />
+        </>
       )}
     </div>
+  );
+}
+
+/** 최근 실사(cdc-inventory 0.12.0 CS-1 — 만든 시각 최신 순) — 끝나지 않은 것 먼저, 누르면 그 실사 */
+const OPEN_STATES = new Set(['COUNTING', 'RECOUNT_REQUIRED', 'PENDING_APPROVAL']);
+function RecentCounts({ cdcId, onOpen }: { readonly cdcId: string; readonly onOpen: (id: string) => void }) {
+  const api = useApi();
+  const query = useQuery({
+    queryKey: ['cdc', cdcId, 'count-sessions', 'recent'],
+    refetchInterval: 15_000,
+    queryFn: () => request('GET', api.inventory.GET('/cdcs/{cdcId}/count-sessions', { params: { path: { cdcId }, query: { size: 30 } } })),
+  });
+  return (
+    <section className="space-y-2">
+      <h2 className="text-base font-semibold">{c.recent}</h2>
+      <p className="text-xs text-base-content/55">{c.recentHint}</p>
+      <QueryState state={toUiState(query, (d) => d.items.length === 0)} onRetry={() => void query.refetch()} emptyText={c.recentEmpty}>
+        {(d) => (
+          <ul className="divide-y divide-base-300 rounded-box border border-base-300 bg-base-100" data-testid="count-recent">
+            {[...d.items]
+              .sort((a, b) => Number(!OPEN_STATES.has(a.state ?? '')) - Number(!OPEN_STATES.has(b.state ?? '')))
+              .map((s) => (
+                <li key={s.sessionId}>
+                  <button type="button" className="flex w-full flex-wrap items-center gap-x-4 gap-y-1 px-4 py-2.5 text-left text-sm hover:bg-base-200" onClick={() => s.sessionId && onOpen(s.sessionId)} data-testid="count-recent-row">
+                    <span className="w-28 font-mono font-semibold" title={s.sessionId}>
+                      {s.sessionNumber ?? s.sessionId}
+                    </span>
+                    <CountStateBadge state={s.state} />
+                    <span className="text-base-content/70">{c.recentLine(s.locationCodes?.length ?? 0)}</span>
+                    {s.reason && <span className="text-base-content/60">{s.reason}</span>}
+                    <span className="ml-auto flex items-center gap-2 text-xs text-base-content/55">
+                      <Who id={s.startedBy} />
+                      {s.createdAt ? formatSeoul(s.createdAt) : ''}
+                    </span>
+                  </button>
+                </li>
+              ))}
+          </ul>
+        )}
+      </QueryState>
+    </section>
   );
 }
 
